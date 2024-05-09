@@ -1,0 +1,1045 @@
+%{
+
+open Newtonsoft.Json.Linq
+
+open OzmaDB.OzmaUtils
+open OzmaDB.OzmaUtils.Serialization.Json
+open OzmaDB.OzmaQL.AST
+
+type ParsedFieldExpr = FieldExpr<EntityRef, LinkedFieldRef>
+type ParsedFromExpr = FromExpr<EntityRef, LinkedFieldRef>
+type ParsedSelectExpr = SelectExpr<EntityRef, LinkedFieldRef>
+type ParsedSelectTreeExpr = SelectTreeExpr<EntityRef, LinkedFieldRef>
+type ParsedSetOperationExpr = SetOperationExpr<EntityRef, LinkedFieldRef>
+type ParsedSingleSelectExpr = SingleSelectExpr<EntityRef, LinkedFieldRef>
+type ParsedQueryResult = QueryResult<EntityRef, LinkedFieldRef>
+type ParsedQueryColumnResult = QueryColumnResult<EntityRef, LinkedFieldRef>
+type ParsedAttributesMap = AttributesMap<EntityRef, LinkedFieldRef>
+type ParsedBoundAttributesMap = BoundAttributesMap<EntityRef, LinkedFieldRef>
+type ParsedCommonTableExpr = CommonTableExpr<EntityRef, LinkedFieldRef>
+type ParsedCommonTableExprs = CommonTableExprs<EntityRef, LinkedFieldRef>
+type ParsedOrderLimitClause = OrderLimitClause<EntityRef, LinkedFieldRef>
+type ParsedAggExpr = AggExpr<EntityRef, LinkedFieldRef>
+type ParsedArgument = Argument<EntityRef, EntityRef, LinkedFieldRef>
+type ParsedArgumentsMap = OrderedMap<ArgumentName, ParsedArgument>
+type ParsedOrderColumn = OrderColumn<EntityRef, LinkedFieldRef>
+type ParsedFromEntity = FromEntity<EntityRef>
+type ParsedValuesValue = ValuesValue<EntityRef, LinkedFieldRef>
+type ParsedInsertExpr = InsertExpr<EntityRef, LinkedFieldRef>
+type ParsedUpdateExpr = UpdateExpr<EntityRef, LinkedFieldRef>
+type ParsedDeleteExpr = DeleteExpr<EntityRef, LinkedFieldRef>
+type ParsedDataExpr = DataExpr<EntityRef, LinkedFieldRef>
+type ParsedUpdateAssignExpr = UpdateAssignExpr<EntityRef, LinkedFieldRef>
+type ParsedBoundAttributeExpr = BoundAttributeExpr<EntityRef, LinkedFieldRef>
+type ParsedBoundAttribute = BoundAttribute<EntityRef, LinkedFieldRef>
+type ParsedAttribute = Attribute<EntityRef, LinkedFieldRef>
+type ParsedTableExpr = TableExpr<EntityRef, LinkedFieldRef>
+type ParsedFromTableExpr = FromTableExpr<EntityRef, LinkedFieldRef>
+type ParsedMainEntity = MainEntity<EntityRef>
+
+[<NoEquality; NoComparison>]
+type ParsedViewExpr =
+    { Pragmas : PragmasMap
+      Arguments : ParsedArgumentsMap
+      Select : ParsedSelectExpr
+      MainEntity : ParsedMainEntity option
+    }
+
+[<NoEquality; NoComparison>]
+type ParsedCommandExpr =
+    { Pragmas : PragmasMap
+      Arguments : ParsedArgumentsMap
+      Command : ParsedDataExpr
+    }
+
+type ParsedIndexColumn = IndexColumn<EntityRef, LinkedFieldRef>
+
+[<NoEquality; NoComparison>]
+type private RawQueryResult =
+    | AResult of ParsedQueryResult
+    | AAttribute of AttributeName * ParsedAttribute
+
+[<NoEquality; NoComparison>]
+type private InSource =
+    | InValues of ParsedFieldExpr[]
+    | InSelect of ParsedSelectExpr
+
+let private inExpr (valuesConstr : (ParsedFieldExpr * ParsedFieldExpr[]) -> ParsedFieldExpr)
+                   (selectConstr : (ParsedFieldExpr * ParsedSelectExpr) -> ParsedFieldExpr)
+                   (needle : ParsedFieldExpr)
+                   (haystack : InSource) : ParsedFieldExpr =
+    match haystack with
+    | InValues vals -> valuesConstr (needle, vals)
+    | InSelect sel -> selectConstr (needle, sel)
+
+let private extractInOneSource : ParsedFieldExpr[] -> InSource = function
+    | [| FESubquery sel |] -> InSelect sel
+    | vals -> InValues vals
+
+let private parseMap (error : string) (vals : ('k * 'v) seq) : Map<'k, 'v> =
+    try
+        Map.ofSeqUnique vals
+    with
+        | Failure msg -> failwith <| sprintf "%s: %s" error msg
+
+let private parseHashMap (error : string) (vals : ('k * 'v) seq) : HashMap<'k, 'v> =
+    try
+        HashMap.ofSeqUnique vals
+    with
+        | Failure msg -> failwith <| sprintf "%s: %s" error msg
+
+let private parseOrderedMap (error : string) (vals : ('k * 'v) seq) : OrderedMap<'k, 'v> =
+    try
+        OrderedMap.ofSeqUnique vals
+    with
+        | Failure msg -> failwith <| sprintf "%s: %s" error msg
+
+let private parseOrderedSet (error : string) (vals : 'a seq) : OrderedSet<'a> =
+    try
+        OrderedSet.ofSeqUnique vals
+    with
+        | Failure msg -> failwith <| sprintf "%s: %s" error msg
+
+let private splitResults (results : RawQueryResult seq) : ParsedAttributesMap * ParsedQueryResult[] =
+    let getResult = function
+        | AResult res -> Some res
+        | AAttribute (name, attr) -> None
+    let getAttribute = function
+        | AResult res -> None
+        | AAttribute (name, attr) -> Some (name, attr)
+
+    let attributes = results |> Seq.mapMaybe getAttribute |> parseMap "Clashing row attribute names"
+    let results = results |> Seq.mapMaybe getResult |> Seq.toArray
+    (attributes, results)
+
+let private validJsonValue = function
+    | FUserViewRef _
+    | FUserViewRefArray _ -> false // We need to first dereference them.
+    | _ -> true
+
+let private coalesceJsonObject (exprs : (OzmaQLName * ParsedFieldExpr) list) : ParsedFieldExpr =
+    let rec tryExtract = function
+        | [] -> Some []
+        | ((name, FEValue v) :: t) when validJsonValue v -> Option.map (fun nt -> (name, v) :: nt) (tryExtract t)
+        | _ -> None
+
+    match tryExtract exprs with
+    | None -> exprs |> Seq.map (fun (name, e) -> (name, e)) |> Map.ofSeq |> FEJsonObject
+    | Some vals -> vals |> Seq.map (fun (name, v) -> (string name, JToken.FromObject v)) |> jsonObject :> JToken |> ComparableJToken |> FJson |> FEValue
+
+let private coalesceJsonArray (exprs : ParsedFieldExpr list) : ParsedFieldExpr =
+    let rec tryExtract = function
+        | [] -> Some []
+        | ((FEValue v) :: t) when validJsonValue v -> Option.map (fun nt -> v :: nt) (tryExtract t)
+        | _ -> None
+
+    match tryExtract exprs with
+    | None -> List.toArray exprs |> FEJsonArray
+    | Some vals -> vals |> Seq.map JToken.FromObject |> jsonArray :> JToken |> ComparableJToken |> FJson |> FEValue
+
+let private makeFunc (name : OzmaQLName) (exprs : ParsedFieldExpr array) : ParsedFieldExpr =
+    if Map.containsKey name allowedAggregateFunctions && Array.length exprs > 0 then
+        FEAggFunc (name, AEAll exprs)
+    else
+        FEFunc (name, exprs)
+
+let private makeAggFunc (name : OzmaQLName) (expr : ParsedAggExpr) : ParsedFieldExpr =
+    if Map.containsKey name allowedAggregateFunctions then
+        match expr with
+        | AEAll exprs when Array.length exprs = 0 -> failwithf "No arguments to an aggregate function %O" name
+        | _ -> ()
+        FEAggFunc (name, expr)
+    else
+        failwithf "Unknown aggregate function %O" name
+
+let private addOrderLimitClause (orderLimit : ParsedOrderLimitClause) : ParsedSelectTreeExpr -> ParsedSelectTreeExpr = function
+    | SSelect sel -> SSelect { sel with OrderLimit = orderLimit }
+    | SValues _ -> failwith "RDER BY and LIMIT/OFFSET support for VALUES is not implemented"
+    | SSetOp op -> SSetOp { op with OrderLimit = orderLimit }
+
+%}
+
+// Atoms
+%token <int> INT
+%token <decimal> DECIMAL
+%token <string> ID
+%token <string> ARGUMENT_ID
+%token <string> GLOBAL_ARGUMENT_ID
+%token <string> STRING
+%token <bool> BOOL
+%token NULL
+
+// Symbols
+%token LEFT_BRACE
+%token RIGHT_BRACE
+%token LEFT_PAREN
+%token RIGHT_PAREN
+%token LEFT_BRACKET
+%token RIGHT_BRACKET
+%token DOUBLE_COLON
+%token COLON
+%token SEMICOLON
+%token COMMA
+%token DOT
+%token EQ
+%token NOT_EQ
+%token AT
+%token LESS
+%token GREATER
+%token LESS_EQ
+%token GREATER_EQ
+%token BOLD_ARROW
+%token BOLD_BANG_ARROW
+%token BANG
+%token CONCAT
+%token AT_LEFT_BRACE
+%token LIKE_OP
+%token NOT_LIKE_OP
+%token ILIKE_OP
+%token NOT_ILIKE_OP
+%token ARROW
+%token DOUBLE_ARROW
+%token PLUS
+%token MINUS
+%token MULTIPLY
+%token DIVIDE
+%token AMPERSAND
+%token MATCH_REGEX
+%token MATCH_REGEX_CI
+%token NOT_MATCH_REGEX
+%token NOT_MATCH_REGEX_CI
+%token GET_ENTITY_ATTR
+%token GET_FIELD_ATTR
+
+// Keywords
+%token SELECT
+%token FROM
+%token WHERE
+%token LEFT
+%token RIGHT
+%token INNER
+%token OUTER
+%token JOIN
+%token ON
+%token ORDER
+%token BY
+%token AS
+%token ASC
+%token DESC
+%token AND
+%token OR
+%token LIKE
+%token ILIKE
+%token SIMILAR
+%token IN
+%token IS
+%token TO
+%token NOT
+%token FOR
+%token INSERT
+%token INTO
+%token CASE
+%token WHEN
+%token THEN
+%token ELSE
+%token END
+%token LIMIT
+%token OFFSET
+%token UNION
+%token INTERSECT
+%token EXCEPT
+%token UPDATE
+%token DELETE
+%token OF
+%token VALUES
+%token DISTINCT
+%token ALL
+%token GROUP
+%token ARRAY
+%token INHERITED
+%token OFTYPE
+%token WITH
+%token RECURSIVE
+%token ANY
+%token SOME
+%token MATERIALIZED
+%token SET
+%token NULLS
+%token FIRST
+%token LAST
+%token SUPERUSER
+%token ROLE
+%token LATERAL
+%token DEFAULT
+%token USING
+%token CASCADE
+%token ACTION
+%token NO
+%token ONLY
+%token MATCH
+%token MAPPING
+%token CONST
+%token SINGLE
+%token PER
+%token ROW
+%token INTERNAL
+%token FIELD
+%token DOMAIN
+%token TYPE
+
+// Types
+%token INT_TYPE
+%token DECIMAL_TYPE
+%token STRING_TYPE
+%token BOOL_TYPE
+%token DATETIME_TYPE
+%token DATE_TYPE
+%token INTERVAL_TYPE
+%token REFERENCE_TYPE
+%token ENUM_TYPE
+%token JSON_TYPE
+%token UVREF_TYPE
+%token UUID_TYPE
+
+// Misc
+%token EOF
+
+%left OR
+%left AND
+%right NOT
+// Non-assoc doesn't work correctly in F#: https://github.com/fsprojects/FsLexYacc/issues/39
+%nonassoc IS
+%nonassoc EQ NOT_EQ LESS_EQ LESS GREATER GREATER_EQ
+%nonassoc IN LIKE ILIKE SIMILAR
+%left LIKE_OP NOT_LIKE_OP ILIKE_OP NOT_ILIKE_OP MATCH_REGEX MATCH_REGEX_CI NOT_MATCH_REGEX NOT_MATCH_REGEX_CI CONCAT ARROW DOUBLE_ARROW
+%left PLUS MINUS
+%left MULTIPLY DIVIDE
+%left DOUBLE_COLON
+%left DOT
+
+%start viewExpr
+%type <ParsedViewExpr> viewExpr
+
+%start fieldType
+%type <ParsedFieldType> fieldType
+
+%start fieldExpr
+%type <ParsedFieldExpr> fieldExpr
+
+%start boundAttributesMap
+%type <ParsedBoundAttributesMap> boundAttributesMap
+
+%start indexColumn
+%type <ParsedIndexColumn> indexColumn
+
+%start commandExpr
+%type <ParsedCommandExpr> commandExpr
+
+%type <ParsedSelectExpr> SelectExpr
+%type <ParsedInsertExpr> InsertExpr
+%type <ParsedUpdateExpr> UpdateExpr
+%type <ParsedDeleteExpr> DeleteExpr
+%type <FieldRef> FieldRef
+
+%%
+
+// Entry points
+viewExpr : ViewExpr EOF { $1 }
+fieldExpr : FieldExpr EOF { $1 }
+fieldType : FieldType EOF { $1 }
+boundAttributesMap : BoundAttributes EOF { $1 }
+indexColumn : IndexColumn EOF { $1 }
+commandExpr : CommandExpr EOF { $1 }
+
+// Expressions
+
+// SELECT
+
+ViewExpr:
+    | OptArguments Pragmas SelectExpr OptMainEntityClause { { Pragmas = $2; Arguments = $1; Select = $3; MainEntity = $4 } }
+
+Pragmas:
+    | PragmasList { parseMap "Clashing pragma names" $1 }
+
+SetEq:
+    | EQ { () }
+    | TO { () }
+
+PragmasList:
+    |                                            { [] }
+    | SET Name SetEq Value SEMICOLON PragmasList { ($2, $4) :: $6 }
+
+OptArguments:
+    |           { OrderedMap.empty }
+    | Arguments { $1 }
+
+Arguments:
+    | LEFT_BRACE OptArgumentsList RIGHT_BRACE COLON { parseOrderedMap "Clashing argument names" $2 }
+
+OptArgumentsList:
+    |                                      { [] }
+    | ArgumentEntry                        { [ $1 ] }
+    | ArgumentEntry COMMA OptArgumentsList { $1 :: $3 }
+
+ArgumentEntry:
+    | ARGUMENT_ID Argument { (OzmaQLName $1, $2) }
+
+Argument:
+    | ExprFieldType OptNullable OptDefault OptBoundAttributes { { ArgType = $1; Optional = $2; DefaultValue = $3; Attributes = $4 } }
+
+OptNullable:
+    |      { false }
+    | NULL { true }
+
+OptDefault:
+    |               { None }
+    | DEFAULT Value { Some $2 }
+
+WithClause:
+    | WITH WithBindings           { { Recursive = false; Exprs = Array.ofList $2; Extra = ObjectMap.empty } }
+    | WITH RECURSIVE WithBindings { { Recursive = true; Exprs = Array.ofList $3; Extra = ObjectMap.empty } }
+
+OptWithClause:
+    | WithClause { Some $1 }
+    |            { None }
+
+WithBinding:
+    | Name WithBindingBody { ($1, $2) }
+
+Materialized:
+    |                  { None }
+    | NOT MATERIALIZED { Some false }
+    | MATERIALIZED     { Some true }
+
+MaybeColumnAliases:
+    |               { None }
+    | ColumnAliases { Some $1 }
+
+WithBindingBody:
+    | MaybeColumnAliases AS Materialized SelectWithParens { { Fields = $1; Expr = $4; Materialized = $3; Extra = ObjectMap.empty } }
+
+WithBindings:
+    | WithBinding                    { [ $1 ] }
+    | WithBinding COMMA              { [ $1 ] }
+    | WithBinding COMMA WithBindings { $1 :: $3 }
+
+// We don't allow select expressions with nested parentheses now because it's difficult to implement as LALR(1) for all our cases (or I'm missing something obvious).
+SelectExpr:
+    | SelectNoParens   { $1 }
+    | SelectWithParens { $1 }
+
+SelectWithParens:
+    | LEFT_PAREN SelectNoParens RIGHT_PAREN   { $2 }
+    | LEFT_PAREN SelectWithParens RIGHT_PAREN { $2 }
+
+SelectNoParens:
+    | SimpleSelect                             { { CTEs = None; Tree = $1; Extra = ObjectMap.empty } }
+    | SelectClause SortClause                  { { $1 with Tree = addOrderLimitClause { OrderBy = $2; Offset = None; Limit = None } $1.Tree } }
+    | SelectClause OptSortClause SelectLimit   { { $1 with Tree = addOrderLimitClause { $3 with OrderBy = $2 } $1.Tree } }
+    | WithClause SelectClause OrderLimitClause {
+        let inner = addOrderLimitClause $3 $2.Tree
+        if Option.isNone $2.CTEs then
+            { CTEs = Some $1; Tree = inner; Extra = ObjectMap.empty }
+        else
+            failwith "Nested WITH clauses are not supported now"
+    }
+
+ValuesClause:
+    | VALUES ValuesEntryList { List.toArray $2 }
+
+AllowDuplicates:
+    |          { false }
+    | DISTINCT { false }
+    | ALL      { true }
+
+SimpleSelect:
+    | SingleSelect                                   { SSelect $1 }
+    | ValuesClause                                   { SValues $1 }
+    | SetOpSelect SetOp AllowDuplicates SelectClause { SSetOp { Operation = $2; AllowDuplicates = $3; A = $1; B = $4; OrderLimit = emptyOrderLimitClause } }
+
+SetOpSelect:
+    | SingleSelect     { { CTEs = None; Tree = SSelect $1; Extra = ObjectMap.empty } }
+    | ValuesClause     { { CTEs = None; Tree = SValues $1; Extra = ObjectMap.empty } }
+    | SelectWithParens { $1 }
+
+SelectClause:
+    | SimpleSelect     { { CTEs = None; Tree = $1; Extra = ObjectMap.empty } }
+    | SelectWithParens { $1 }
+
+SetOp:
+    | UNION     { Union }
+    | INTERSECT { Intersect }
+    | EXCEPT    { Except }
+
+SingleSelect:
+    | SELECT OptQueryResults OptFromClause OptWhereClause OptGroupByClause {
+        let (attributes, results) = splitResults $2
+        { Attributes = attributes
+          Results = results
+          From = $3
+          Where = $4
+          GroupBy = $5
+          OrderLimit = emptyOrderLimitClause
+          Extra = ObjectMap.empty
+        }
+    }
+
+OrderLimitClause:
+    | OptSortClause OptSelectLimit { { $2 with OrderBy = $1 } }
+
+OptSelectLimit:
+    |             { emptyOrderLimitClause }
+    | SelectLimit { $1 }
+
+SelectLimit:
+    | LimitClause OffsetClause { { OrderBy = [||]; Limit = Some $1; Offset = Some $2 } }
+    | OffsetClause LimitClause { { OrderBy = [||]; Limit = Some $2; Offset = Some $1 } }
+    | LimitClause              { { OrderBy = [||]; Limit = Some $1; Offset = None } }
+    | OffsetClause             { { OrderBy = [||]; Limit = None; Offset = Some $1 } }
+
+SortClause:
+    | ORDER BY OrderByList { List.toArray $3 }
+
+OptSortClause:
+    |            { [||] }
+    | SortClause { $1 }
+
+OrderByList:
+    | OrderByExpr                   { [$1] }
+    | OrderByExpr COMMA             { [$1] }
+    | OrderByExpr COMMA OrderByList { $1 :: $3 }
+
+OrderByExpr:
+    | FieldExpr SortOrder NullsOrder { { Expr = $1; Order = $2; Nulls = $3 } }
+
+SortOrder:
+    |      { None }
+    | ASC  { Some Asc }
+    | DESC { Some Desc }
+
+LimitClause:
+    | LIMIT FieldExpr { $2 }
+
+OffsetClause:
+    | OFFSET FieldExpr { $2 }
+
+OptFromClause:
+    |                  { None }
+    | FROM QuerySource { Some $2 }
+
+MainEntityClause:
+    | FOR INSERT INTO EntityRef { { Entity = $4; ForInsert = true; Extra = ObjectMap.empty } }
+    | FOR UPDATE OF EntityRef   { { Entity = $4; ForInsert = false; Extra = ObjectMap.empty } }
+
+OptMainEntityClause:
+    |                  { None }
+    | MainEntityClause { Some $1 }
+
+OptQueryResults:
+    |                                   { [] }
+    | QueryResult                       { [$1] }
+    | QueryResult COMMA OptQueryResults { $1 :: $3 }
+
+QueryResult:
+    | AT Name EQ AttributeValue  { AAttribute ($2, $4) }
+    | Name DOT Name DOT MULTIPLY { AResult (QRAll (Some { Schema = Some $1; Name = $3; })) }
+    | Name DOT MULTIPLY          { AResult (QRAll (Some { Schema = None; Name = $1; })) }
+    | MULTIPLY                   { AResult (QRAll None) }
+    | QueryColumnResult          { AResult (QRExpr $1) }
+
+AttributeValue:
+    | MaybeInternal Dependency FieldExpr { { Internal = $1; Dependency = $2; Expression = $3 } }
+
+MaybeInternal:
+    |          { false }
+    | INTERNAL { true }
+
+Dependency:
+    |         { DSPerRow }
+    | PER ROW { DSPerRow }
+    | SINGLE  { DSSingle }
+    | CONST   { DSConst }
+
+QueryColumnResult:
+    | FieldExpr OptBoundAttributes         { { Alias = None; Attributes = $2; Result = $1 } }
+    | FieldExpr AS Name OptBoundAttributes { { Alias = Some $3; Attributes = $4; Result = $1 } }
+
+OptBoundAttributes:
+    |                 { Map.empty }
+    | BoundAttributes { $1 }
+
+BoundAttributes:
+    | AT_LEFT_BRACE BoundAttributeValues RIGHT_BRACE { parseMap "Clashing attribute names" $2 }
+
+BoundAttributeValues:
+    |                                                        { [] }
+    | Name EQ BoundAttributeValue                            { [($1, $3)] }
+    | Name EQ BoundAttributeValue COMMA BoundAttributeValues { ($1, $3) :: $5 }
+
+BoundAttributeValue:
+    | MaybeInternal Dependency BoundAttributeValueExpr { { Internal = $1; Dependency = $2; Expression = $3 } }
+
+BoundMapping:
+    | MAPPING BoundAttrMappingWhenList BoundAttrMappingElse END { { Entries = parseHashMap "Clashing mapping values" $2; Default = $3 } }
+
+BoundAttributeValueExpr:
+    | BoundMapping       { BAMapping $1 }
+    | ARRAY BoundMapping { BAArrayMapping $2 }
+    | FieldExpr          { BAExpr $1 }
+
+OptConst:
+    | CONST { true }
+    |       { false }
+
+BoundAttrMappingWhenList:
+    | WHEN Value THEN Value BoundAttrMappingWhenList { ($2, $4) :: $5 }
+    | WHEN Value THEN Value                          { [($2, $4)] }
+
+BoundAttrMappingElse:
+    |            { None }
+    | ELSE Value { Some $2 }
+
+SubSelectAlias:
+    | AS Name               { { Name = $2; Fields = None } }
+    | AS Name ColumnAliases { { Name = $2; Fields = Some $3 } }
+
+FromEntityRole:
+    |                     { false }
+    | WITH SUPERUSER ROLE { true }
+
+FromEntityName:
+    |         { None }
+    | AS Name { Some $2 }
+
+OnlyEntity:
+    |      { false }
+    | ONLY { true }
+
+FromEntity:
+    | OnlyEntity EntityRef FromEntityRole FromEntityName { { Ref = $2; Only = $1; AsRoot = $3; Alias = $4; Extra = ObjectMap.empty } }
+
+FromTableExpr:
+    | TableExpr SubSelectAlias { { Lateral = false; Expression = $1; Alias = $2 } }
+    | LATERAL TableExpr SubSelectAlias { { Lateral = true; Expression = $2; Alias = $3 } }
+
+TableExpr:
+    | SelectWithParens                                      { TESelect $1 }
+    | DOMAIN OF LinkedFieldRef DomainExprInfo               { TEDomain ($3, $4) }
+    | DOMAIN OF FIELD Name DOT Name DomainExprInfo          { TEFieldDomain ({ Schema = None; Name = $4 }, $6, $7) }
+    | DOMAIN OF FIELD Name DOT Name DOT Name DomainExprInfo { TEFieldDomain ({ Schema = Some $4; Name = $6 }, $8, $9) }
+    | DOMAIN OF TYPE ExprFieldType DomainExprInfo           { TETypeDomain ($4, $5) }
+
+DomainExprInfo:
+    | FromEntityRole { { AsRoot = $1 } }
+
+QuerySource:
+    | FromEntity                         { FEntity $1 }
+    | FromTableExpr                      { FTableExpr $1 }
+    | JoinedTable                        { $1 }
+
+JoinedTable:
+    | LEFT_PAREN JoinedTable RIGHT_PAREN { $2 }
+    | QuerySource JoinType JOIN QuerySource ON FieldExpr { FJoin { Type = $2; A = $1; B = $4; Condition = $6 } }
+
+ColumnAliases:
+    | LEFT_PAREN ColumnAliasesList RIGHT_PAREN { List.toArray $2 }
+
+ColumnAliasesList:
+    | Name                         { [$1] }
+    | Name COMMA                   { [$1] }
+    | Name COMMA ColumnAliasesList { $1 :: $3 }
+
+ValuesEntryList:
+    | ValuesEntry                       { [$1] }
+    | ValuesEntry COMMA                 { [$1] }
+    | ValuesEntry COMMA ValuesEntryList { $1 :: $3 }
+
+ValuesEntry:
+    | LEFT_PAREN ValueItemsList RIGHT_PAREN { List.toArray $2 }
+
+ValueItemsList:
+    | ValuesValue                      { [$1] }
+    | ValuesValue COMMA                { [$1] }
+    | ValuesValue COMMA ValueItemsList { $1 :: $3 }
+
+JoinType:
+    |       { Inner }
+    | INNER { Inner }
+    | OUTER { Outer }
+    | LEFT  { Left  }
+    | RIGHT { Right }
+
+EntityRef:
+    | Name DOT Name { { Schema = Some $1; Name = $3; } }
+    | Name          { { Schema = None; Name = $1; } }
+
+ValueRef:
+    | FieldRef           { VRColumn $1 }
+    | ARGUMENT_ID        { VRArgument (PLocal <| OzmaQLName $1) }
+    | GLOBAL_ARGUMENT_ID { VRArgument (PGlobal <| OzmaQLName $1) }
+
+LinkedFieldRef:
+    | ValueRef LinkedFieldsList {
+        let (asRoot, path) = $2
+        { Ref = $1; Path = List.toArray path; AsRoot = asRoot }
+    }
+
+LinkedFieldsList:
+    |                                       { (false, []) }
+    | BANG                                  { (true, []) }
+    | BOLD_ARROW Name LinkedFieldsList      {
+        let (asRoot, tail) = $3
+        (false, { Name = $2; AsRoot = asRoot } :: tail)
+    }
+    | BOLD_BANG_ARROW Name LinkedFieldsList {
+        let (asRoot, tail) = $3
+        (true, { Name = $2; AsRoot = asRoot } :: tail)
+    }
+
+FieldRef:
+    | Name DOT Name DOT Name { { Entity = Some { Schema = Some $1; Name = $3 }; Name = $5 } }
+    | Name DOT Name          { { Entity = Some { Schema = None; Name = $1 }; Name = $3 } }
+    | Name                   { { Entity = None; Name = $1 } }
+
+OptWhereClause:
+    |                 { None }
+    | WHERE FieldExpr { Some $2 }
+
+OptGroupByClause:
+    |                           { [||] }
+    | GROUP BY NonEmptyExprList { $3 }
+
+NonEmptyExprs:
+    | FieldExpr { [ $1 ] }
+    | FieldExpr COMMA { [ $1 ] }
+    | FieldExpr COMMA NonEmptyExprs { $1 :: $3 }
+
+NonEmptyExprList:
+    | NonEmptyExprs { List.toArray $1 }
+
+ParenedNonEmptyExprList:
+    | LEFT_PAREN NonEmptyExprList RIGHT_PAREN { $2 }
+
+ExprList:
+    |                  { [||] }
+    | NonEmptyExprList { $1 }
+
+ParenedExprList:
+    | LEFT_PAREN ExprList RIGHT_PAREN { $2 }
+
+
+// See SQLParse for explanation on this.
+AnyAllOp:
+    | Any LEFT_PAREN FieldExpr RIGHT_PAREN { fun op a -> FEAny (a, op, $3) }
+    | ALL LEFT_PAREN FieldExpr RIGHT_PAREN { fun op a -> FEAll (a, op, $3) }
+
+Any:
+    | ANY  { () }
+    | SOME { () }
+
+FieldExpr:
+    | FieldExpr OR FieldExpr  { FEOr ($1, $3) }
+    | FieldExpr AND FieldExpr { FEAnd ($1, $3) }
+    | NOT FieldExpr           { FENot $2 }
+    | FieldExprIs             { $1 }
+
+FieldExprIs:
+    | FieldExprEq IS NULL                          { FEIsNull $1 }
+    | FieldExprEq IS NOT NULL                      { FEIsNotNull $1 }
+    | FieldExprEq IS DISTINCT FROM FieldExprEq     { FEDistinct ($1, $5) }
+    | FieldExprEq IS NOT DISTINCT FROM FieldExprEq { FENotDistinct ($1, $6) }
+    | FieldExprEq                                  { $1 }
+
+FieldExprEq:
+    | FieldExprLike EQ FieldExprLikeOp2         { $3 BOEq $1 }
+    | FieldExprLike LESS FieldExprLikeOp2       { $3 BOLess $1 }
+    | FieldExprLike GREATER FieldExprLikeOp2    { $3 BOGreater $1 }
+    | FieldExprLike NOT_EQ FieldExprLikeOp2     { $3 BONotEq $1 }
+    | FieldExprLike LESS_EQ FieldExprLikeOp2    { $3 BOLessEq $1 }
+    | FieldExprLike GREATER_EQ FieldExprLikeOp2 { $3 BOGreaterEq $1 }
+    | FieldExprLike                             { $1 }
+
+FieldExprLikeOp2:
+    | FieldExprLike { fun op a -> FEBinaryOp (a, op, $1) }
+    | AnyAllOp      { $1 }
+
+FieldExprLike:
+    | FieldExprMisc LIKE FieldExprMisc           { FEBinaryOp ($1, BOLike, $3) }
+    | FieldExprMisc NOT LIKE FieldExprMisc       { FEBinaryOp ($1, BONotLike, $4) }
+    | FieldExprMisc ILIKE FieldExprMisc          { FEBinaryOp ($1, BOILike, $3) }
+    | FieldExprMisc NOT ILIKE FieldExprMisc      { FEBinaryOp ($1, BONotILike, $4) }
+    | FieldExprMisc SIMILAR TO FieldExprMisc     { FESimilarTo ($1, $4) }
+    | FieldExprMisc NOT SIMILAR TO FieldExprMisc { FENotSimilarTo ($1, $5) }
+    | FieldExprMisc                              { $1 }
+
+// Implemented in this way because there is a conflict between multi-paren-ed SelectExpr and FieldExpr with a SelectExpr inside.
+FieldInSource:
+    | SelectWithParens        { InSelect $1 }
+    | ParenedNonEmptyExprList { extractInOneSource $1 }
+
+FieldExprMisc:
+    | FieldExprMisc LIKE_OP FieldExprMisc            { FEBinaryOp ($1, BOLike, $3) }
+    | FieldExprMisc NOT_LIKE_OP FieldExprMisc        { FEBinaryOp ($1, BONotLike, $3) }
+    | FieldExprMisc ILIKE_OP FieldExprMisc           { FEBinaryOp ($1, BOILike, $3) }
+    | FieldExprMisc NOT_ILIKE_OP FieldExprMisc       { FEBinaryOp ($1, BONotILike, $3) }
+    | FieldExprMisc MATCH_REGEX FieldExprMisc        { FEBinaryOp ($1, BOMatchRegex, $3) }
+    | FieldExprMisc MATCH_REGEX_CI FieldExprMisc     { FEBinaryOp ($1, BOMatchRegexCI, $3) }
+    | FieldExprMisc NOT_MATCH_REGEX FieldExprMisc    { FEBinaryOp ($1, BONotMatchRegex, $3) }
+    | FieldExprMisc NOT_MATCH_REGEX_CI FieldExprMisc { FEBinaryOp ($1, BONotMatchRegexCI, $3) }
+    | FieldExprMisc CONCAT FieldExprMisc             { FEBinaryOp ($1, BOConcat, $3) }
+    | FieldExprMisc ARROW FieldExprMisc              { FEBinaryOp ($1, BOJsonArrow, $3) }
+    | FieldExprMisc DOUBLE_ARROW FieldExprMisc       { FEBinaryOp ($1, BOJsonTextArrow, $3) }
+    | FieldExprMisc PLUS FieldExprMisc               { FEBinaryOp ($1, BOPlus, $3) }
+    | FieldExprMisc MINUS FieldExprMisc              { FEBinaryOp ($1, BOMinus, $3) }
+    | FieldExprMisc MULTIPLY FieldExprMisc           { FEBinaryOp ($1, BOMultiply, $3) }
+    | FieldExprMisc DIVIDE FieldExprMisc             { FEBinaryOp ($1, BODivide, $3) }
+
+    // Now the same, but for ANY/ALL. I hate this.
+    | FieldExprMisc LIKE_OP AnyAllOp            { $3 BOLike $1 }
+    | FieldExprMisc NOT_LIKE_OP AnyAllOp        { $3 BONotLike $1 }
+    | FieldExprMisc ILIKE_OP AnyAllOp           { $3 BOILike $1 }
+    | FieldExprMisc NOT_ILIKE_OP AnyAllOp       { $3 BONotILike $1 }
+    | FieldExprMisc MATCH_REGEX AnyAllOp        { $3 BOMatchRegex $1 }
+    | FieldExprMisc MATCH_REGEX_CI AnyAllOp     { $3 BOMatchRegexCI $1 }
+    | FieldExprMisc NOT_MATCH_REGEX AnyAllOp    { $3 BONotMatchRegex $1 }
+    | FieldExprMisc NOT_MATCH_REGEX_CI AnyAllOp { $3 BONotMatchRegexCI $1 }
+    | FieldExprMisc CONCAT AnyAllOp             { $3 BOConcat $1 }
+    | FieldExprMisc ARROW AnyAllOp              { $3 BOJsonArrow $1 }
+    | FieldExprMisc DOUBLE_ARROW AnyAllOp       { $3 BOJsonTextArrow $1 }
+    | FieldExprMisc PLUS AnyAllOp               { $3 BOPlus $1 }
+    | FieldExprMisc MINUS AnyAllOp              { $3 BOMinus $1 }
+    | FieldExprMisc MULTIPLY AnyAllOp           { $3 BOMultiply $1 }
+    | FieldExprMisc DIVIDE AnyAllOp             { $3 BODivide $1 }
+
+    | FieldExprMisc IN FieldInSource            { inExpr FEIn FEInQuery $1 $3 }
+    | FieldExprMisc NOT IN FieldInSource        { inExpr FENotIn FENotInQuery $1 $4 }
+    | FieldExprMisc DOUBLE_COLON ExprFieldType  { FECast ($1, $3) }
+    | CaseExpr                                  { $1 }
+    | MatchExpr                                 { $1 }
+    | LinkedFieldRef INHERITED FROM EntityRef   { FEInheritedFrom ($1, { Ref = $4; Extra = ObjectMap.empty }) }
+    | LinkedFieldRef OFTYPE EntityRef           { FEOfType ($1, { Ref = $3; Extra = ObjectMap.empty }) }
+    | EntityRef GET_ENTITY_ATTR Name            { FEEntityAttr ($1, $3) }
+    | LinkedFieldRef GET_FIELD_ATTR Name        { FEFieldAttr ($1, $3) }
+    | LinkedFieldRef                            { FERef $1 }
+    | Value                                     { FEValue $1 }
+    | Name ParenedExprList                      { makeFunc $1 $2 }
+    | Name LEFT_PAREN AggFuncArgs RIGHT_PAREN   { makeAggFunc $1 $3 }
+    // Special case for supporting `lest` SQL function.
+    | LEFT ParenedExprList                      { FEFunc (OzmaQLName "left", $2) }
+    | JsonObject                                { $1 }
+    | JsonArray                                 { $1 }
+    | SelectWithParens                          { FESubquery $1 }
+    | LEFT_PAREN FieldExpr RIGHT_PAREN          { $2 }
+
+AggFuncArgs:
+    | ALL ExprList       { AEAll $2 }
+    | DISTINCT FieldExpr { AEDistinct $2 }
+    | MULTIPLY           { AEStar }
+
+CaseExpr:
+    | CASE CaseWhenList CaseElse END { FECase (List.toArray $2, $3) }
+
+CaseWhenList:
+    | WHEN FieldExpr THEN FieldExpr CaseWhenList { ($2, $4) :: $5 }
+    | WHEN FieldExpr THEN FieldExpr              { [($2, $4)] }
+
+CaseElse:
+    |                { None }
+    | ELSE FieldExpr { Some $2 }
+
+MatchExpr:
+    | MATCH ON FieldExpr CaseWhenList CaseElse END { FEMatch ($3, List.toArray $4, $5) }
+
+IntArrayList:
+    | INT                    { [ $1 ] }
+    | INT COMMA IntArrayList { $1 :: $3 }
+
+IntArrayNonEmpty:
+    | IntArrayList { List.toArray $1 }
+
+StringArrayList:
+    | STRING                       { [ $1 ] }
+    | STRING COMMA StringArrayList { $1 :: $3 }
+
+StringArrayNonEmpty:
+    | StringArrayList { List.toArray $1 }
+
+BoolArrayList:
+    | BOOL                     { [ $1 ] }
+    | BOOL COMMA BoolArrayList { $1 :: $3 }
+
+BoolArrayNonEmpty:
+    | BoolArrayList { List.toArray $1 }
+
+DecimalArrayList:
+    | DECIMAL                        { [ $1 ] }
+    | DECIMAL COMMA DecimalArrayList { $1 :: $3 }
+
+DecimalArrayNonEmpty:
+    | DecimalArrayList { List.toArray $1 }
+
+UserViewRefArrayList:
+    | UserViewRef                            { [ $1 ] }
+    | UserViewRef COMMA UserViewRefArrayList { $1 :: $3 }
+
+UserViewRefArrayNonEmpty:
+    | UserViewRefArrayList { List.toArray $1 }
+
+Value:
+    | INT                                    { FInt $1 }
+    | DECIMAL                                { FDecimal $1 }
+    | PLUS INT                               { FInt $2 }
+    | PLUS DECIMAL                           { FDecimal $2 }
+    | MINUS INT                              { FInt (-$2) }
+    | MINUS DECIMAL                          { FDecimal (-$2) }
+    | STRING                                 { FString $1 }
+    | BOOL                                   { FBool $1 }
+    | UserViewRef                            { FUserViewRef $1 }
+    | ARRAY LEFT_BRACKET Array RIGHT_BRACKET { $3 }
+    | NULL                                   { FNull }
+
+Array:
+    |                          { FStringArray [||] }
+    | StringArrayNonEmpty      { FStringArray $1 }
+    | IntArrayNonEmpty         { FIntArray $1 }
+    | BoolArrayNonEmpty        { FBoolArray $1 }
+    | DecimalArrayNonEmpty     { FDecimalArray $1 }
+    | UserViewRefArrayNonEmpty { FUserViewRefArray $1 }
+
+UserViewRef:
+    | AMPERSAND EntityRef { $2 }
+
+JsonObject:
+    | LEFT_BRACE JsonFields RIGHT_BRACE { coalesceJsonObject $2 }
+
+JsonFields:
+    |                            { [] }
+    | JsonField                  { [$1] }
+    | JsonField COMMA JsonFields { $1 :: $3 }
+
+JsonField:
+    | Name COLON FieldExpr { ($1, $3) }
+
+JsonArray:
+    | LEFT_BRACKET JsonItems RIGHT_BRACKET { coalesceJsonArray $2 }
+
+JsonItems:
+    |                   { [] }
+    | NonEmptyJsonItems { $1 }
+
+NonEmptyJsonItems:
+    | FieldExpr                         { [$1] }
+    | FieldExpr COMMA                   { [$1] }
+    | FieldExpr COMMA NonEmptyJsonItems { $1 :: $3 }
+
+DeleteAction:
+    | CASCADE     { RDACascade }
+    | SET NULL    { RDASetNull }
+    | SET DEFAULT { RDASetDefault }
+
+OptDeleteAction:
+    |                        { None }
+    | ON DELETE DeleteAction { Some $3 }
+
+CommonScalarType:
+    | INT_TYPE                                  { SFTInt }
+    | DECIMAL_TYPE                              { SFTDecimal }
+    | STRING_TYPE                               { SFTString }
+    | BOOL_TYPE                                 { SFTBool }
+    | DATETIME_TYPE                             { SFTDateTime }
+    | DATE_TYPE                                 { SFTDate }
+    | INTERVAL_TYPE                             { SFTInterval }
+    | JSON_TYPE                                 { SFTJson }
+    | UVREF_TYPE                                { SFTUserViewRef }
+    | UUID_TYPE                                 { SFTUuid }
+    | ENUM_TYPE LEFT_PAREN EnumList RIGHT_PAREN { SFTEnum (parseOrderedSet "Clashing enum items" $3) }
+
+ScalarType:
+    | CommonScalarType                                                { $1 }
+    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN OptDeleteAction { SFTReference ($3, $5) }
+
+FieldType:
+    | ScalarType                              { FTScalar $1 }
+    | ARRAY LEFT_PAREN ScalarType RIGHT_PAREN { FTArray $3 }
+
+ExprScalarType:
+    | CommonScalarType                                { $1 }
+    | REFERENCE_TYPE LEFT_PAREN EntityRef RIGHT_PAREN { SFTReference ($3, None) }
+
+ExprFieldType:
+    | ExprScalarType                              { FTScalar $1 }
+    | ARRAY LEFT_PAREN ExprScalarType RIGHT_PAREN { FTArray $3 }
+
+EnumList:
+    | STRING                { [ $1 ] }
+    | STRING COMMA EnumList { $1 :: $3 }
+
+// We allow some keywords that can't appear near a name as names.
+Name:
+    | ID      { OzmaQLName $1 }
+    | ACTION  { OzmaQLName "action" }
+    | CASCADE { OzmaQLName "cascade" }
+    | TYPE    { OzmaQLName "type" }
+    | FIELD   { OzmaQLName "field" }
+
+IndexOpClass:
+    |      { None }
+    | Name { Some $1 }
+
+NullsOrder:
+    |             { None }
+    | NULLS FIRST { Some NullsFirst }
+    | NULLS LAST  { Some NullsLast }
+
+IndexColumn:
+    | FieldExpr IndexOpClass SortOrder NullsOrder { { Expr = $1; OpClass = $2; Order = $3; Nulls = $4 } }
+
+// INSERT
+
+InsertExpr:
+    | OptWithClause INSERT INTO FromEntity ColumnAliases InsertSource { { CTEs = $1; Entity = $4; Fields = $5; Source = $6; Extra = ObjectMap.empty } }
+
+InsertSource:
+    | DEFAULT VALUES               { ISDefaultValues }
+    | SelectExpr                   { ISSelect $1 }
+
+ValuesValue:
+    | FieldExpr { VVExpr $1 }
+    | DEFAULT   { VVDefault }
+
+// UPDATE
+
+UpdateExpr:
+    | OptWithClause UPDATE FromEntity SET UpdateAssigns OptFromClause OptWhereClause { { CTEs = $1; Entity = $3; Assignments = $5; From = $6; Where = $7; Extra = ObjectMap.empty } }
+
+UpdateAssigns:
+    | UpdateAssignsList { List.toArray $1 }
+
+UpdateAssignsList:
+    | UpdateAssign                         { [$1] }
+    | UpdateAssign COMMA                   { [$1] }
+    | UpdateAssign COMMA UpdateAssignsList { $1 :: $3 }
+
+UpdateAssign:
+    | Name EQ ValuesValue               { UAESet ($1, $3) }
+    | ColumnAliases EQ SelectWithParens { UAESelect ($1, $3) }
+
+// DELETE
+
+DeleteExpr:
+    | OptWithClause DELETE FROM FromEntity OptUsingClause OptWhereClause { { CTEs = $1; Entity = $4; Using = $5; Where = $6; Extra = ObjectMap.empty } }
+
+OptUsingClause:
+    |                   { None }
+    | USING QuerySource { Some $2 }
+
+// Data expressions
+
+DataExpr:
+    | SelectExpr { DESelect $1 }
+    | InsertExpr { DEInsert $1 }
+    | UpdateExpr { DEUpdate $1 }
+    | DeleteExpr { DEDelete $1 }
+
+CommandExpr:
+    | OptArguments Pragmas DataExpr { { Pragmas = $2; Arguments = $1; Command = $3 } }

@@ -1,0 +1,121 @@
+{
+
+module OzmaDB.SQL.Lex
+
+open System
+open FSharp.Text.Lexing
+
+open OzmaDB.Parsing
+open OzmaDB.SQL.Parsing
+
+}
+
+// Regular expressions
+let whitespace = [' ' '\t' ]
+let newline = ('\n' | "\r\n")
+
+// Case-insensitive chars
+let a = ['A' 'a']
+let b = ['B' 'b']
+let c = ['C' 'c']
+let d = ['D' 'd']
+let e = ['E' 'e']
+let f = ['F' 'f']
+let g = ['G' 'g']
+let h = ['H' 'h']
+let i = ['I' 'i']
+let j = ['J' 'j']
+let k = ['K' 'k']
+let l = ['L' 'l']
+let m = ['M' 'm']
+let n = ['N' 'n']
+let o = ['O' 'o']
+let p = ['P' 'p']
+let q = ['Q' 'q']
+let r = ['R' 'r']
+let s = ['S' 's']
+let t = ['T' 't']
+let u = ['U' 'u']
+let v = ['V' 'v']
+let w = ['W' 'w']
+let x = ['X' 'x']
+let y = ['Y' 'y']
+let z = ['Z' 'z']
+
+rule tokenizeSQL = parse
+    // Atoms
+    | ['0'-'9'] ['0'-'9']* "." ['0'-'9']* { Parse.DECIMAL (lexbuf.Lexeme |> String |> decimal) }
+    | ['0'-'9'] ['0'-'9']* { Parse.INT (lexbuf.Lexeme |> String |> int64) }
+    | "\"" ( [^ '"'] | "\"\"" )* "\"" { Parse.QUOTED_ID (escapedId 0 lexbuf) }
+    | e "'" ( [^ '\\' '\''] | "\\" _ )* "'" { Parse.STRING (escapedString 1 lexbuf) }
+    | "'" ( [^ '\''] | "''" )* "'" { Parse.STRING (sqlString 0 lexbuf) }
+
+    // Symbols
+    | "::"   { Parse.DOUBLE_COLON }
+    | "("    { Parse.LEFT_PAREN }
+    | ")"    { Parse.RIGHT_PAREN }
+    | "["    { Parse.LEFT_BRACKET }
+    | "]"    { Parse.RIGHT_BRACKET }
+    | ","    { Parse.COMMA }
+    | "."    { Parse.DOT }
+    | "="    { Parse.EQ }
+    | "<>"   { Parse.NOT_EQ }
+    | "!="   { Parse.NOT_EQ }
+    | ">="   { Parse.GREATER_EQ }
+    | ">"    { Parse.GREATER }
+    | "<="   { Parse.LESS_EQ }
+    | "<"    { Parse.LESS }
+    | "||"   { Parse.CONCAT }
+    | "~~"   { Parse.LIKE_OP }
+    | "!~~"  { Parse.NOT_LIKE_OP }
+    | "~~*"  { Parse.ILIKE_OP }
+    | "!~~*" { Parse.NOT_ILIKE_OP }
+    | "~"    { Parse.MATCH_REGEX }
+    | "~*"   { Parse.MATCH_REGEX_CI }
+    | "!~"   { Parse.NOT_MATCH_REGEX }
+    | "!~*"  { Parse.NOT_MATCH_REGEX_CI }
+    | "->"   { Parse.ARROW }
+    | "->>"  { Parse.DOUBLE_ARROW }
+    | "+"    { Parse.PLUS }
+    | "-"    { Parse.MINUS }
+    | "*"    { Parse.MULTIPLY }
+    | "/"    { Parse.DIVIDE }
+
+    // Keywords
+    | t r u e         { Parse.BOOL true }
+    | f a l s e       { Parse.BOOL false }
+    | n u l l         { Parse.NULL }
+    | a n d           { Parse.AND }
+    | o r             { Parse.OR }
+    | i s             { Parse.IS }
+    | n o t           { Parse.NOT }
+    | c a s e         { Parse.CASE }
+    | w h e n         { Parse.WHEN }
+    | t h e n         { Parse.THEN }
+    | e l s e         { Parse.ELSE }
+    | e n d           { Parse.END }
+    | c o a l e s c e { Parse.COALESCE }
+    | g r e a t e s t { Parse.GREATEST }
+    | l e a s t       { Parse.LEAST }
+    | l i k e         { Parse.LIKE }
+    | i l i k e       { Parse.ILIKE }
+    | s i m i l a r   { Parse.SIMILAR }
+    | t o             { Parse.TO }
+    | i n             { Parse.IN }
+    | a n y           { Parse.ANY }
+    | s o m e         { Parse.SOME }
+    | a l l           { Parse.ALL }
+    | a r r a y       { Parse.ARRAY }
+    | d i s t i n c t { Parse.DISTINCT }
+    | f r o m         { Parse.FROM }
+
+    // Unescaped ids
+    | ['a'-'z' 'A'-'Z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_' '$']* { Parse.ID ((String lexbuf.Lexeme).ToLowerInvariant()) }
+
+    // Whitespace
+    | whitespace { tokenizeSQL lexbuf }
+    | newline    { newline lexbuf; tokenizeSQL lexbuf }
+
+    // Misc
+    | _   { failwith "Lexical error" }
+    | eof { Parse.EOF }

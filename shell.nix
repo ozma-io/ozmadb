@@ -1,10 +1,10 @@
 { pkgs ? import <nixpkgs> {} }:
 
 let
-  dotnet = pkgs.dotnet-sdk_7;
+  dotnet = pkgs.dotnet-sdk_8;
 
   env = pkgs.buildFHSUserEnv {
-    name = "fundb";
+    name = "ozmadb";
     targetPkgs = pkgs: with pkgs; [
       dotnet
       zlib
@@ -31,10 +31,10 @@ let
   userShell = builtins.getEnv "SHELL";
 
 in pkgs.stdenv.mkDerivation {
-  name = "fundb-fhs-dev";
+  name = "ozmadb-fhs-dev";
 
   shellHook = ''
-    exec ${env}/bin/fundb
+    exec ${env}/bin/ozmadb
   '';
   buildCommand = "exit 1";
 }

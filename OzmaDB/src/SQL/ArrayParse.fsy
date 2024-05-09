@@ -1,0 +1,37 @@
+%{
+
+open OzmaDB.SQL.AST
+
+%}
+
+%token <string> STRING
+%token NULL
+%token LEFT_BRACE
+%token RIGHT_BRACE
+%token COMMA
+
+// Misc
+%token EOF
+
+%start stringArray
+%type <ValueArray<string>> stringArray
+
+%%
+
+// Entry points
+stringArray : StringArray EOF { $1 }
+
+// Expressions
+
+StringArrayValue:
+    | STRING      { AVValue $1 }
+    | NULL        { AVNull }
+    | StringArray { AVArray $1 }
+
+StringArray:
+    | LEFT_BRACE RIGHT_BRACE                     { [||] }
+    | LEFT_BRACE StringArrayNonEmpty RIGHT_BRACE { List.toArray $2 }
+
+StringArrayNonEmpty:
+    | StringArrayValue                           { [ $1 ] }
+    | StringArrayValue COMMA StringArrayNonEmpty { $1 :: $3 }

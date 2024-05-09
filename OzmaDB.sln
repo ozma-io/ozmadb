@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "OzmaUtils", "OzmaUtils\OzmaUtils.fsproj", "{601089DE-0DC4-4BDC-BA2D-B5CCDB08E01C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OzmaDBSchema", "OzmaDBSchema\OzmaDBSchema.csproj", "{922C3BA9-9CE7-45CB-93E7-EFFEC4D4C4DE}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "OzmaDB", "OzmaDB\OzmaDB.fsproj", "{A2B615F3-6679-411B-80D5-14C43D9AE840}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{601089DE-0DC4-4BDC-BA2D-B5CCDB08E01C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{601089DE-0DC4-4BDC-BA2D-B5CCDB08E01C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{601089DE-0DC4-4BDC-BA2D-B5CCDB08E01C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{601089DE-0DC4-4BDC-BA2D-B5CCDB08E01C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{922C3BA9-9CE7-45CB-93E7-EFFEC4D4C4DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{922C3BA9-9CE7-45CB-93E7-EFFEC4D4C4DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{922C3BA9-9CE7-45CB-93E7-EFFEC4D4C4DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{922C3BA9-9CE7-45CB-93E7-EFFEC4D4C4DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A2B615F3-6679-411B-80D5-14C43D9AE840}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A2B615F3-6679-411B-80D5-14C43D9AE840}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A2B615F3-6679-411B-80D5-14C43D9AE840}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A2B615F3-6679-411B-80D5-14C43D9AE840}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
