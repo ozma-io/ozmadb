@@ -1,8 +1,7 @@
 module OzmaDB.UserViews.Generate
 
 open System.Threading
-open NetJs
-open NetJs.Json
+open System.Collections.Generic
 
 open OzmaDB.OzmaUtils
 open OzmaDB.Exception
@@ -12,6 +11,7 @@ open OzmaDB.UserViews.Types
 open OzmaDB.Layout.Types
 open OzmaDB.Layout.Info
 open OzmaDB.Triggers.Merge
+open OzmaDB.JavaScript.Json
 open OzmaDB.JavaScript.Runtime
 open OzmaDB.Objects.Types
 
@@ -41,48 +41,52 @@ let emptyGeneratedUserViews : GeneratedUserViews =
     { Schemas = Map.empty
     }
 
-let private convertUserView (KeyValue (k, v : Value.Value)) =
-    let query = v.GetString().Get()
-    let uv =
-        { Query = query
-          AllowBroken = false
-        }
-    (OzmaQLName k, uv)
-
-type private UserViewsGeneratorScript (runtime : IJSRuntime, name : string, scriptSource : string) =
+type private UserViewsGeneratorScript (engine : JSEngine, path : string, scriptSource : string) =
     let func =
         try
-            runtime.CreateDefaultFunction { Path = name; Source = scriptSource; AllowBroken = false }
+            engine.CreateDefaultFunction { Path = path; Source = scriptSource; AllowBroken = false }
         with
-        | :? NetJsException as e ->
+        | :? JavaScriptRuntimeException as e ->
             raisefUserWithInner UserViewGenerateException e "Couldn't initialize user view generator"
 
-    let generateUserViews (layout : Value.Value) (cancellationToken : CancellationToken) : Map<UserViewName, SourceUserView> =
+    let generateUserViews (layout : obj) (cancellationToken : CancellationToken) : Map<UserViewName, SourceUserView> =
+        let convertUserView (KeyValue (uvName, res : obj)) =
+            match res with
+            | :? string as query ->
+                let uv =
+                    { Query = query
+                      AllowBroken = false
+                    }
+                (OzmaQLName uvName, uv)
+            | _ -> raisef UserViewGenerateException "User view %s must be a string" uvName
         try
-            let newViews = runFunctionInRuntime func cancellationToken [|layout|]
-            newViews.GetObject().GetOwnProperties() |> Seq.map convertUserView |> Map.ofSeq
+            match engine.RunJSFunction(func, [|layout|], cancellationToken) with
+            | :? IDictionary<string, obj> as newViews ->
+                newViews |> Seq.map convertUserView |> Map.ofSeq
+            | _ -> raisef UserViewGenerateException "User view generator must return an object"
         with
         | :? JavaScriptRuntimeException as e ->
             raisefUserWithInner UserViewGenerateException e ""
 
     member this.Generate layout cancellationToken = generateUserViews layout cancellationToken
-    member this.Runtime = runtime
 
 let private generatorName (schemaName : SchemaName) =
     sprintf "user_views_generators/%O.mjs" schemaName
 
-type private UserViewsGenerator (runtime : IJSRuntime, layout : Layout, triggers : MergedTriggers, cancellationToken : CancellationToken, forceAllowBroken : bool) =
+type private UserViewsGenerator (engine : JSEngine, layout : Layout, triggers : MergedTriggers, cancellationToken : CancellationToken, forceAllowBroken : bool) =
     let serializedLayout = serializeLayout triggers layout
 
     let generateUserViewsSchema (name : SchemaName) (script : SourceUserViewsGeneratorScript) : PossiblyBroken<GeneratedUserViewsSchema> =
+        let layout = engine.Json.Serialize( serializedLayout)
+        let gen = UserViewsGeneratorScript(engine, generatorName name, script.Script)
         try
-            let gen = UserViewsGeneratorScript(runtime, generatorName name, script.Script)
-            let layout = V8JsonWriter.Serialize(runtime.Context, serializedLayout)
             let uvs = gen.Generate layout cancellationToken
             Ok { UserViews = uvs }
         with
-        | :? NetJsException as e when forceAllowBroken || script.AllowBroken ->
+        | :? UserViewGenerateException as e when forceAllowBroken || script.AllowBroken ->
             Error { Error = e; AllowBroken = script.AllowBroken }
+        | :? UserViewGenerateException as e ->
+            raisefWithInner UserViewGenerateException e "In user view schema %O" name
 
     let generateUserViews (views : SourceUserViews) : GeneratedUserViews =
         let generateOne name (view : SourceUserViewsSchema) =
@@ -95,13 +99,13 @@ type private UserViewsGenerator (runtime : IJSRuntime, layout : Layout, triggers
     member this.GenerateUserViews views = generateUserViews views
 
 let generateUserViews
-        (runtime : IJSRuntime)
+        (engine : JSEngine)
         (layout : Layout)
         (triggers : MergedTriggers)
         (forceAllowBroken : bool)
         (userViews : SourceUserViews)
         (cancellationToken : CancellationToken) : GeneratedUserViews =
-    let state = UserViewsGenerator(runtime, layout, triggers, cancellationToken, forceAllowBroken)
+    let state = UserViewsGenerator(engine, layout, triggers, cancellationToken, forceAllowBroken)
     state.GenerateUserViews userViews
 
 let passthruGeneratedUserViews (source : SourceUserViews) : GeneratedUserViews =

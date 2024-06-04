@@ -3,8 +3,6 @@ module OzmaDB.Triggers.Run
 open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
-open NetJs
-open NetJs.Json
 open Newtonsoft.Json
 
 open OzmaDB.OzmaUtils
@@ -12,6 +10,7 @@ open OzmaDB.OzmaUtils.Serialization.Utils
 open OzmaDB.Exception
 open OzmaDB.OzmaQL.AST
 open OzmaDB.OzmaQL.Arguments
+open OzmaDB.JavaScript.Json
 open OzmaDB.JavaScript.Runtime
 open OzmaDB.Triggers.Source
 open OzmaDB.Triggers.Types
@@ -42,10 +41,10 @@ type ArgsTriggerResult =
     | ATUntouched
     | ATCancelled
 
-type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) =
+type TriggerScript (engine : JSEngine, name : string, scriptSource : string) =
     let func =
         try
-            runtime.CreateDefaultFunction <| moduleFile name scriptSource
+            engine.CreateDefaultFunction <| moduleFile name scriptSource
         with
         | :? JavaScriptRuntimeException as e ->
             raisefUserWithInner TriggerRunException e ""
@@ -57,17 +56,17 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                   Time = TTBefore
                   Source = source
                 }
-            let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
-            let oldArgs = V8JsonWriter.Serialize(runtime.Context, args)
+            let eventValue = engine.Json.Serialize(event)
+            let oldArgs = engine.Json.Serialize(args)
             let! newArgs =
                 task {
                     try
-                        return! runAsyncFunctionInRuntime runtime func cancellationToken [|eventValue; oldArgs|]
+                        return! engine.RunAsyncJSFunction(func, [|eventValue; oldArgs|], cancellationToken)
                     with
                     | :? JavaScriptRuntimeException as e ->
                         return raisefWithInner TriggerRunException e ""
                 }
-            match newArgs.Data with
+            match newArgs with
             | :? bool as ret -> return (if ret then ATUntouched else ATCancelled)
             | _ ->
                 let ret =
@@ -87,15 +86,15 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                   Time = TTAfter
                   Source = source
                 }
-            let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
+            let eventValue = engine.Json.Serialize(event)
             let functionArgs =
                 match args with
                 | Some oldArgsObj ->
-                    let oldArgs = V8JsonWriter.Serialize(runtime.Context, oldArgsObj)
+                    let oldArgs = engine.Json.Serialize(oldArgsObj)
                     [|eventValue; oldArgs|]
                 | None -> [|eventValue|]
             try
-                let! _ = runAsyncFunctionInRuntime runtime func cancellationToken functionArgs
+                let! _ = engine.RunAsyncJSFunction(func, functionArgs, cancellationToken)
                 return ()
             with
             | :? JavaScriptRuntimeException as e ->
@@ -115,20 +114,18 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
                   Time = TTBefore
                   Source = TSDelete (Some id)
                 }
-            let eventValue = V8JsonWriter.Serialize(runtime.Context, event)
+            let eventValue = engine.Json.Serialize(event)
             let! maybeContinue =
                 task {
                     try
-                        return! runAsyncFunctionInRuntime runtime func cancellationToken [|eventValue|]
+                        return! engine.RunAsyncJSFunction(func, [|eventValue|], cancellationToken)
                     with
                     | :? JavaScriptRuntimeException as e ->
                         return raisefWithInner TriggerRunException e ""
                 }
-            try
-                return maybeContinue.GetBoolean ()
-            with
-            | :? NetJsException as e ->
-                return raisefUserWithInner TriggerRunException e "Invalid return value for trigger"
+            match maybeContinue with
+            | :? bool as b -> return b
+            | v -> return raisef TriggerRunException "Invalid return value for trigger: %O" v
         }
 
     member this.RunInsertTriggerAfter (entity : ResolvedEntityRef) (newId : int) (args : LocalArgumentsMap) (cancellationToken : CancellationToken) : Task =
@@ -140,7 +137,7 @@ type TriggerScript (runtime : IJSRuntime, name : string, scriptSource : string) 
     member this.RunDeleteTriggerAfter (entity : ResolvedEntityRef) (cancellationToken : CancellationToken) : Task =
         runAfterTrigger entity (TSDelete None) None cancellationToken
 
-    member this.Runtime = runtime
+    member this.Engine = engine
 
 type PreparedTrigger =
     { Resolved : ResolvedTrigger
@@ -172,12 +169,12 @@ type PreparedTriggers =
 let private triggerName (triggerRef : TriggerRef) =
     sprintf "triggers/%O/%O/%O/%O.mjs" triggerRef.Schema triggerRef.Entity.Schema triggerRef.Entity.Name triggerRef.Name
 
-type private PreparedTriggersBuilder (runtime : IJSRuntime, forceAllowBroken : bool) =
+type private PreparedTriggersBuilder (engine : JSEngine, forceAllowBroken : bool) =
     let prepareTriggersEntity (schemaName : SchemaName) (triggerEntity : ResolvedEntityRef) (triggers : TriggersEntity) : PreparedTriggersEntity =
         let prepareOne name (trigger : ResolvedTrigger) =
             let triggerRef = { Schema = schemaName; Entity = triggerEntity; Name = name }
             try
-                let script = TriggerScript(runtime, triggerName triggerRef, trigger.Procedure)
+                let script = TriggerScript(engine, triggerName triggerRef, trigger.Procedure)
                 Ok { Resolved = trigger; Script = script }
             with
             | :? TriggerRunException as e when trigger.AllowBroken || forceAllowBroken ->
@@ -202,6 +199,6 @@ type private PreparedTriggersBuilder (runtime : IJSRuntime, forceAllowBroken : b
 
     member this.PrepareTriggers triggers = prepareTriggers triggers
 
-let prepareTriggers (runtime : IJSRuntime) (forceAllowBroken : bool) (triggers : ResolvedTriggers) =
-    let builder = PreparedTriggersBuilder(runtime, forceAllowBroken)
+let prepareTriggers (engine : JSEngine) (forceAllowBroken : bool) (triggers : ResolvedTriggers) =
+    let builder = PreparedTriggersBuilder(engine, forceAllowBroken)
     builder.PrepareTriggers triggers

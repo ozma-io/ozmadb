@@ -19,10 +19,10 @@ let moduleFiles (modules : ResolvedModules) : ModuleFile seq =
                 match maybeModule with
                 | Error e -> ()
                 | Ok modul -> 
-                    let ref = {
-                        Schema = schemaName
-                        Path = path
-                    }
+                    let ref =
+                        { Schema = schemaName
+                          Path = path
+                        }
                     yield {
                         Path = moduleName ref
                         Source = modul.Source
@@ -30,30 +30,32 @@ let moduleFiles (modules : ResolvedModules) : ModuleFile seq =
                     }
     }
 
-let private extractBrokenModulesInfo (runtime : IJSRuntime) =
-    let extractOne (path, info) =
-        match path with
-        | CIRegex @"lib/^([^/]+)/(.*)$" [rawSchemaName; rawPath] ->
-            Some <| Map.singleton (OzmaQLName rawSchemaName) (Map.singleton rawPath info)
-        | _ -> None
-    runtime.BrokenModules
-    |> Map.toSeq
-    |> Seq.mapMaybe extractOne
-    |> Seq.fold (Map.unionWithKey (fun k -> Map.unionUnique)) Map.empty
-
-let private resolvedPreparedModulesSchema (resolved : ModulesSchema) (failed : Map<Path, BrokenInfo>) : ModulesSchema =
+let private resolvedPreparedModulesSchema (runtime : JSEngine) (forceAllowBroken : bool) (schemaName : SchemaName) (resolved : ModulesSchema) : ModulesSchema =
     let getOne path maybeModule =
         match maybeModule with
         | Error e -> Error e
-        | Ok modul ->
-            match Map.tryFind path failed with
-            | Some error -> Error error
-            | None -> Ok modul
-    let Modules = Map.map getOne resolved.Modules
-    { Modules = Modules }
+        | Ok (modul : ResolvedModule) ->
+            let ref =
+                { Schema = schemaName
+                  Path = path
+                }
+            let moduleFile =
+                { Path = moduleName ref
+                  Source = modul.Source
+                  AllowBroken = modul.AllowBroken
+                }
+            try
+                ignore <| runtime.CreateModule moduleFile
+                Ok modul
+            with
+            | :? JavaScriptRuntimeException as e when modul.AllowBroken || forceAllowBroken ->
+                Error { AllowBroken = modul.AllowBroken; Error = e }
+            | :? JavaScriptRuntimeException as e ->
+                raisefWithInner JavaScriptRuntimeException e "In module %O/%s" schemaName path
+    let modules = Map.map getOne resolved.Modules
+    { Modules = modules }
 
-let resolvedLoadedModules (resolved : ResolvedModules) (runtime : IJSRuntime) : ResolvedModules =
-    let failed = extractBrokenModulesInfo runtime
-    let getOne name resolvedSchema = resolvedPreparedModulesSchema resolvedSchema (Map.findWithDefault name Map.empty failed)
+let resolvedLoadedModules (resolved : ResolvedModules) (runtime : JSEngine) (forceAllowBroken : bool) : ResolvedModules =
+    let getOne name schema = resolvedPreparedModulesSchema runtime forceAllowBroken name schema
     let schemas = Map.map getOne resolved.Schemas
     { Schemas = schemas }

@@ -98,6 +98,7 @@
     <Compile Include="src/Permissions/View.fs" />
     <Compile Include="src/Permissions/Entity.fs" />
 
+    <Compile Include="src/JavaScript/Json.fs" />
     <Compile Include="src/JavaScript/Utils.fs" />
     <Compile Include="src/JavaScript/AST.fs" />
     <Compile Include="src/JavaScript/OzmaQL.fs" />
@@ -197,9 +198,7 @@
     <PackageReference Include="Serilog" Version="3.1.*" />
     <PackageReference Include="Serilog.AspNetCore" Version="8.0.*" />
     <PackageReference Include="prometheus-net.AspNetCore" Version="8.2.*" />
-
-    <PackageReference Include="NetJs" Version="1.4.*" />
-    <PackageReference Include="NetJs.Json" Version="1.4.*" />
+    <PackageReference Include="Microsoft.ClearScript.linux-x64" Version="7.4.*" />
   </ItemGroup>
 
 </Project>

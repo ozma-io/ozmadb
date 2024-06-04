@@ -46,7 +46,7 @@ type DomainsAPI (api : IOzmaDBAPI) =
             findDomainForField ctx.Layout fieldRef ctx.Domains
 
     member this.GetDomainValues (req : GetDomainValuesRequest) : Task<Result<DomainValuesResponse, DomainErrorInfo>> =
-        wrapAPIResult rctx logger "getDomainValues" req <| task {
+        wrapAPIResult rctx logger "getDomainValues" req <| fun () -> task {
             let flags = Option.defaultValue emptyDomainFlags req.Flags
             match getDomain flags req.Field with
             | None ->
@@ -79,7 +79,7 @@ type DomainsAPI (api : IOzmaDBAPI) =
         }
 
     member this.GetDomainExplain (req : GetDomainExplainRequest) : Task<Result<ExplainedQuery, DomainErrorInfo>> =
-        wrapAPIResult rctx logger "getDomainExplain" req <| task {
+        wrapAPIResult rctx logger "getDomainExplain" req <| fun () -> task {
             if not (canExplain rctx.User.Saved.Type) then
                 logger.LogError("Explain access denied")
                 return Error (DEDomain (DEAccessDenied "Explain access denied"))

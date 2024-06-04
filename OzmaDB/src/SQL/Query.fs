@@ -87,10 +87,7 @@ let private convertValueOrThrow (valType : SimpleValueType) (rawValue : obj) =
     | (VTScalar STLocalDateTime, (:? LocalDateTime as value)) -> VLocalDateTime value
     | (VTScalar STDate, (:? LocalDate as value)) -> VDate value
     | (VTScalar STInterval, (:? Period as value)) -> VInterval value
-    | (VTScalar STJson, (:? string as value)) ->
-        match tryJson value with
-        | Some j -> VJson (ComparableJToken j)
-        | None -> raisef QueryException "Invalid JSON value"
+    | (VTScalar STJson, (:? JToken as value)) -> VJson (ComparableJToken value)
     | (VTScalar STUuid, (:? Guid as value)) -> VUuid value
     | (VTArray scalarType, (:? Array as rootVals)) ->
         let rec convertArray (convFunc : obj -> 'a option) (vals : Array) : ValueArray<'a> =
@@ -145,7 +142,7 @@ let private npgsqlValue : Value -> NpgsqlDbType option * obj = function
     | VLocalDateTime dt -> (Some NpgsqlDbType.Timestamp, upcast dt)
     | VDate dt -> (Some NpgsqlDbType.Date, upcast dt)
     | VInterval int -> (Some NpgsqlDbType.Interval, upcast int)
-    | VJson j -> (Some NpgsqlDbType.Jsonb, upcast j)
+    | VJson j -> (Some NpgsqlDbType.Jsonb, upcast j.Json)
     | VUuid u -> (Some NpgsqlDbType.Uuid, upcast u)
     | VIntArray vals -> npgsqlArray NpgsqlDbType.Integer vals
     | VBigIntArray vals -> npgsqlArray NpgsqlDbType.Bigint vals

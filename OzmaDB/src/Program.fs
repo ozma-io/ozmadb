@@ -22,7 +22,6 @@ open Giraffe
 open Giraffe.EndpointRouting
 open NodaTime
 open Npgsql
-open NetJs.Json
 open Serilog
 open Serilog.Events
 open Microsoft.Extensions.Logging
@@ -30,6 +29,7 @@ open Prometheus
 open Prometheus.HttpMetrics
 
 open OzmaDB.OzmaQL.Json
+open OzmaDBSchema
 open OzmaDBSchema.Instances
 open OzmaDB.OzmaUtils
 open OzmaDB.Connection
@@ -346,7 +346,7 @@ let private setupInstancesSource (webAppBuilder : WebApplicationBuilder) =
             if isNull instance.Database then
                 instance.Database <- instance.Username
             StaticInstance(instance, homeRegion) :> IInstancesSource
-        | _ -> failwith "Invalid InstancesSource"
+        | source -> failwithf "Invalid instancesSource: %s" source
     ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)
 
 let private setupHttpUtils (webAppBuilder : WebApplicationBuilder) =
@@ -401,8 +401,7 @@ let main (args : string[]) : int =
             // Enable JSON and NodaTime for PostgreSQL.
             ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
             ignore <| NpgsqlConnection.GlobalTypeMapper.UseNodaTime()
-            // Use JavaScript Date objects.
-            V8SerializationSettings.Default.UseDate <- true
+            ignore <| NpgsqlConnection.GlobalTypeMapper.AddTypeInfoResolverFactory(new ExtraTypeInfoResolverFactory());
 
             let webAppBuilder = WebApplication.CreateBuilder()
             setupConfiguration args webAppBuilder

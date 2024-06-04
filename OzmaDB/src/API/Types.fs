@@ -107,7 +107,7 @@ type IContext =
     abstract member TransactionId : int
     abstract member TransactionTime : Instant
     abstract member LoggerFactory : ILoggerFactory
-    abstract member Runtime : IJSRuntime
+    abstract member Engine : JSEngine
 
     abstract member Layout : Layout
     abstract member UserViews : PrefetchedUserViews
@@ -1093,11 +1093,11 @@ let inline wrapAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggable
         (logger : ILogger)
         (name : string)
         (request : 'Request)
-        (resultTask : Task<Result<'Response, 'Error>>)
+        ([<InlineIfLambda>] f : unit -> Task<Result<'Response, 'Error>>)
         : Task<Result<'Response, 'Error>> =
     task {
         logAPIRequest rctx logger name request
-        let! result = resultTask
+        let! result = f ()
         do! logAPIResult rctx name request result
         return result
     }
@@ -1107,11 +1107,11 @@ let inline wrapUnitAPIResult<'Request, 'Error when 'Error :> IErrorDetails>
         (logger : ILogger)
         (name : string)
         (request : 'Request)
-        (resultTask : Task<Result<unit, 'Error>>)
+        ([<InlineIfLambda>] f : unit -> Task<Result<unit, 'Error>>)
         : Task<Result<unit, 'Error>> =
     task {
         logAPIRequest rctx logger name request
-        let! result = resultTask
+        let! result = f ()
         do! logUnitAPIResult rctx name request result
         return result
     }
@@ -1121,11 +1121,11 @@ let inline wrapAPIError<'Request, 'Response, 'Error when 'Error :> IErrorDetails
         (logger : ILogger)
         (name : string)
         (request : 'Request)
-        (resultTask : Task<Result<'Response, 'Error>>)
+        ([<InlineIfLambda>] f : unit -> Task<Result<'Response, 'Error>>)
         : Task<Result<'Response, 'Error>> =
     task {
         logAPIRequest rctx logger name request
-        let! result = resultTask
+        let! result = f ()
         do! logAPIIfError rctx name request result
         return result
     }

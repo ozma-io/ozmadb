@@ -19,14 +19,15 @@ let inline (|RefNull|_|) (value : 'a) =
     else
         None
 
-let inline raisefWithInner (constr : (string * Exception) -> 'e) (inner : Exception) : StringFormat<'a, 'b> -> 'a =
-    kprintf <| fun str ->
+let raisefWithInner (constr : (string * Exception) -> 'e) (inner : Exception) format =
+    let thenRaise str =
         raise  <| constr (str, inner)
+    ksprintf thenRaise format
 
-let inline raisef (constr : string -> 'e) : StringFormat<'a, 'b> -> 'a =
+let raisef (constr : string -> 'e) format =
     let thenRaise str =
         raise  <| constr str
-    kprintf thenRaise
+    ksprintf thenRaise format
 
 let inline reraise' (e : exn) =
     (ExceptionDispatchInfo.Capture e).Throw ()

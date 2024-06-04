@@ -5,13 +5,14 @@ open Newtonsoft.Json.Linq
 open System.Threading
 open System.Threading.Tasks
 open FSharp.Control.Tasks.Affine
-open NetJs.Value
-open NetJs.Json
+open Microsoft.ClearScript
+open Newtonsoft.Json
 
 open OzmaDB.OzmaUtils
 open OzmaDB.Exception
 open OzmaDB.Objects.Types
 open OzmaDB.OzmaQL.AST
+open OzmaDB.JavaScript.Json
 open OzmaDB.JavaScript.Runtime
 open OzmaDB.Actions.Types
 
@@ -23,10 +24,10 @@ type ActionRunException (message : string, innerException : exn, isUserException
 
     new (message : string) = ActionRunException (message, null, true)
 
-type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
+type ActionScript (engine : JSEngine, name : string, scriptSource : string) =
     let func =
         try
-            runtime.CreateDefaultFunction <| moduleFile name scriptSource
+            engine.CreateDefaultFunction <| moduleFile name scriptSource
         with
         | :? JavaScriptRuntimeException as e ->
             raisefWithInner ActionRunException e "Couldn't initialize action"
@@ -34,23 +35,25 @@ type ActionScript (runtime : IJSRuntime, name : string, scriptSource : string) =
     member this.Run (args : JObject, cancellationToken : CancellationToken) : Task<JObject option> =
         task {
             let argsValue =
-                use writer = new V8JsonWriter(runtime.Context)
+                use writer = new V8JsonWriter(engine.Json)
                 args.WriteTo(writer)
-                writer.Result
+                Option.get writer.Result
             try
-                let! result =  runAsyncFunctionInRuntime runtime func cancellationToken [|argsValue|]
-                match result.Data with
+                let! result =  engine.RunAsyncJSFunction(func, [|argsValue|], cancellationToken)
+                match result with
                 | :? Undefined -> return None
-                | :? Object ->
+                | _ ->
                     use reader = new V8JsonReader(result)
-                    let result = JToken.ReadFrom(reader) :?> JObject
-                    return Some result
-                | _ -> return raisef ActionRunException "Invalid return value"
+                    try
+                        let result = JToken.ReadFrom(reader) :?> JObject
+                        return Some result
+                    with
+                    | :? JsonReaderException as e -> return raisefWithInner ActionRunException e ""
             with
             | :? JavaScriptRuntimeException as e -> return raisefWithInner ActionRunException e ""
         }
 
-    member this.Runtime = runtime
+    member this.Runtime = engine
 
 type PreparedActionsSchema =
     { Actions : Map<ActionName, PossiblyBroken<ActionScript>>
@@ -66,11 +69,11 @@ type PreparedActions =
 let private actionName (actionRef : ActionRef) =
     sprintf "actions/%O/%O.mjs" actionRef.Schema actionRef.Name
 
-type private PreparedActionsBuilder (runtime : IJSRuntime, forceAllowBroken : bool) =
+type private PreparedActionsBuilder (engine : JSEngine, forceAllowBroken : bool) =
     let prepareActionsSchema (schemaName : SchemaName) (actions : ActionsSchema) : PreparedActionsSchema =
         let prepareOne name (action : ResolvedAction) =
             try
-                let script = ActionScript(runtime, actionName { Schema = schemaName; Name = name }, action.Function)
+                let script = ActionScript(engine, actionName { Schema = schemaName; Name = name }, action.Function)
                 Ok script
             with
             | :? ActionRunException as e when action.AllowBroken || forceAllowBroken ->
@@ -85,8 +88,8 @@ type private PreparedActionsBuilder (runtime : IJSRuntime, forceAllowBroken : bo
 
     member this.PrepareActions actions = prepareActions actions
 
-let prepareActions (runtime : IJSRuntime) (forceAllowBroken : bool) (actions : ResolvedActions) : PreparedActions =
-    let eval = PreparedActionsBuilder(runtime, forceAllowBroken)
+let prepareActions (engine : JSEngine) (forceAllowBroken : bool) (actions : ResolvedActions) : PreparedActions =
+    let eval = PreparedActionsBuilder(engine, forceAllowBroken)
     eval.PrepareActions actions
 
 let private resolvedPreparedActionsSchema (resolved : ActionsSchema) (prepared : PreparedActionsSchema) : ActionsSchema =

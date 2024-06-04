@@ -1,13 +1,11 @@
 module OzmaDB.API.JavaScript
 
 open Printf
-open NetJs
-open NetJs.Json
-open NetJs.Template
-open System
 open System.Threading.Tasks
 open System.Runtime.Serialization
 open Microsoft.Extensions.Logging
+open Microsoft.ClearScript
+open Microsoft.ClearScript.JavaScript
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open FSharp.Control.Tasks.Affine
@@ -17,6 +15,7 @@ open OzmaDB.OzmaUtils.Serialization.Utils
 open OzmaDB.Exception
 open OzmaDB.OzmaQL.Utils
 open OzmaDB.API.Types
+open OzmaDB.JavaScript.Json
 open OzmaDB.JavaScript.Runtime
 
 [<SerializeAsObject("error")>]
@@ -44,478 +43,444 @@ type APICallErrorInfo =
             member this.HTTPResponseCode = 500
             member this.Error = this.Error
 
-type JavaScriptAPIException (message : string, innerException : Exception, isUserException : bool) =
-    inherit UserException(message, innerException, isUserException)
-
-    new (message : string, innerException : Exception) =
-        JavaScriptAPIException (message, innerException, isUserException innerException)
-
-    new (message : string) = JavaScriptAPIException (message, null, true)
-
-// We don't declare these public because we need to fix JSON serialization for these first.
+// We don't declare these private because JSON serialization then breaks.
 // See https://stackoverflow.com/questions/54169707/f-internal-visibility-changes-record-constructor-behavior
 type WriteEventRequest =
     { Details : JToken
     }
 
-type CancelWithRequest =
-    { [<DataMember(EmitDefaultValue = false)>]
-      UserData : JToken option
-      [<DataMember(EmitDefaultValue = false)>]
-      Message : string option
-    }
-
-type private APIHandle (api : IOzmaDBAPI, errorConstructor : Value.Function) =
+type private APIHandle (api : IOzmaDBAPI) =
     let logger = api.Request.Context.LoggerFactory.CreateLogger<APIHandle>()
-    let mutable lock = None
+    let mutable lock = Task.AsyncSemaphore(1)
 
     member this.API = api
     member this.Logger = logger
-    member this.Lock =
-        match lock with
-        | None ->
-            let newLock = Task.AsyncSemaphore(1)
-            lock <- Some newLock
-            newLock
-        | Some l -> l
-
+    member this.Lock = lock
+    // We need to support stacking the locks because API functions may call back into JavaScript.
     member inline this.StackLock (f : unit -> Task<'a>) : Task<'a> =
         task {
             let oldLock = lock
-            lock <- None
+            lock <- Task.AsyncSemaphore(1)
             try
                 return! f ()
             finally
                 lock <- oldLock
         }
 
-    member this.ErrorConstructor = errorConstructor
+let private preludeSource = """
+    const apiProxy = globalThis.apiProxy;
+    delete globalThis.apiProxy;
+    const unwrapHostResult = globalThis.unwrapHostResult;
+    delete globalThis.unwrapHostResult;
 
-let inline private throwErrorWithInner (handle : APIHandle) (context : Context) (e : 'a when 'a :> IErrorDetails) (innerException : exn) : 'b =
-    let body = V8JsonWriter.Serialize(context, e)
-    let exc = handle.ErrorConstructor.NewInstance(body)
-    raise <| JSException(e.Message, exc.Value, innerException)
+    const wrapHostFunction = (func) => (...args) => {
+        const ret = func(...args);
+        if (ret instanceof Promise) {
+            return ret.then(unwrapHostResult);
+        } else {
+            return unwrapHostResult(ret);
+        }
+    };
 
-let inline private throwError (handle : APIHandle) (context : Context) (e : 'a when 'a :> IErrorDetails) : 'b =
-    throwErrorWithInner handle context e null
-
-let inline private wrapApiCall<'Result, 'Error when 'Error :> IErrorDetails> (handle : APIHandle) (context : Context) (wrap : (unit -> Task<'Result>) -> Task<Result<'Result, 'Error>>) (f : unit -> Task<'Result>) : Task<'Result> =
-    task {
-        let mutable lockTaken = false
-        do! handle.Lock.WaitAsync()
-        lockTaken <- true
-        try
-            let! res = wrap <| fun () ->
-                task {
-                    handle.Lock.Release()
-                    lockTaken <- false
-                    let! r = f ()
-                    do! handle.Lock.WaitAsync()
-                    lockTaken <- true
-                    return r
-                }
-            match res with
-            | Ok r -> return r
-            | Error e -> return throwError handle context e
-        finally
-            if lockTaken then
-                handle.Lock.Release()
+    const internal = {};
+    for (const key of Object.getOwnPropertyNames(apiProxy)) {
+        const value = apiProxy[key];
+        if (typeof value === 'function') {
+            internal[key] = wrapHostFunction(value);
+        }
     }
 
-let inline private runVoidApiCall (handle : APIHandle) (context : Context)  (f : unit -> Task) : Func<Task<Value.Value>> =
-    let run () =
-        Task.lock handle.Lock <| fun () ->
-            task {
-                do! handle.StackLock <| fun () ->
-                    task {
-                        do! f ()
-                        return ()
-                    }
-                return Value.Undefined.New(context.Isolate)
+    const findInnerByKey = (object, key) => {
+        for (value of Object.values(object)) {
+            if (typeof value === 'object' && value) {
+                const currValue = object[key];
+                if (currValue !== undefined) {
+                    return currValue;
+                }
+                const nestedValue = findInnerByKey(value, key);
+                if (nestedValue !== undefined) {
+                    return nestedValue;
+                }
             }
-    Func<_>(run)
+        }
+    };
 
-let inline private runResultApiCall<'a, 'e when 'e :> IErrorDetails> (handle : APIHandle) (context : Context) (f : unit -> Task<Result<'a, 'e>>) : Func<Task<Value.Value>> =
-    let run () =
-        Task.unmaskableLock handle.Lock <| fun unmask ->
-            task {
-                let! res = handle.StackLock f
-                unmask ()
-                match res with
-                | Ok r -> return V8JsonWriter.Serialize(context, r)
-                | Error e -> return throwError handle context e
+    class OzmaDBError extends Error {
+    constructor(body) {
+        super(body.message);
+        Object.assign(this, body);
+        // Find `userData` and bring it to the top-level.
+        if (!('userData' in body)) {
+            const userData = findInnerByKey(body, 'userData');
+            if (userData !== undefined) {
+                this.userData = userData;
             }
-    Func<_>(run)
+        }
+    }
+    };
 
-let inline private runVoidResultApiCall<'e when 'e :> IErrorDetails> (handle : APIHandle) (context : Context) (f : unit -> Task<Result<unit, 'e>>) : Func<Task<Value.Value>> =
-    let run () =
-        Task.unmaskableLock handle.Lock <| fun unmask ->
-            task {
-                let! res = handle.StackLock f
-                unmask ()
-                match res with
-                | Ok r -> return Value.Undefined.New(context.Isolate)
-                | Error e -> return throwError handle context e
+    globalThis.OzmaDBError = OzmaDBError;
+    // DEPRECATED
+    globalThis.FunDBError = OzmaDBError;
+
+    globalThis.formatDate = (date) => date.toISOString().split('T')[0];
+    globalThis.formatOzmaQLName = (arg) => internal.FormatOzmaQLName(arg);
+    globalThis.formatOzmaQLValue = (arg) => internal.FormatOzmaQLValue(arg);
+
+    // DEPRECATED
+    globalThis.renderDate = globalThis.formatDate;
+    globalThis.renderFunQLName = globalThis.formatOzmaQLName;
+    globalThis.renderFunQLValue = globalThis.formatOzmaQLValue;
+    globalThis.formatFunQLName = globalThis.formatOzmaQLName;
+    globalThis.formatFunQLValue = globalThis.formatOzmaQLValue;
+
+    const normalizeSource = (source) => {
+        if (source.ref) {
+            return { ...source, ...source.ref };
+        } else {
+            return source;
+        }
+    };
+
+    class OzmaDBCurrent {
+        constructor() {
+            Object.freeze(this);
+        }
+
+        getUserView(source, args, chunk) {
+            return internal.GetUserView({ source: normalizeSource(source), args, chunk });
+        };
+
+        getUserViewInfo(source) {
+            return internal.GetUserViewInfo({ source: normalizeSource(source) });
+        };
+
+        getEntityInfo(entity) {
+            return internal.GetEntityInfo({ entity });
+        };
+
+        async insertEntry(entity, fields) {
+            try {
+                const ret = await this.insertEntries(entity, [fields]);
+                return ret.entries[0];
+            } catch (e) {
+                if (e.error === 'transaction') {
+                    // We want to keep the stack trace, so we mutate the exception.
+                    const inner = e.inner;
+                    delete e.operation;
+                    delete e.inner;
+                    Object.assign(e, inner);
+                }
+                throw e;
             }
-    Func<_>(run)
+        };
 
-type APITemplate (isolate : Isolate) =
+        // DEPRECATED
+        async insertEntities(entity, entries) {
+            const ret = await this.insertEntries(entity, entries);
+            return ret.entries.map(entry => entry.id);
+        }
+
+        insertEntries(entity, entries) {
+            return internal.InsertEntries({ entity, entries });
+        };
+
+        // DEPRECATED
+        async updateEntity(entity, id, fields) {
+            const ret = await this.updateEntry(entity, id, fields);
+            return ret.id;
+        };
+
+        updateEntry(entity, id, fields) {
+            return internal.UpdateEntry({ entity, id, fields });
+        };
+
+        // DEPRECATED
+        deleteEntity(entity, id) {
+            return this.deleteEntry(entity, id);
+        };
+
+        deleteEntry(entity, id) {
+            return internal.DeleteEntry({ entity, id });
+        };
+
+        // DEPRECATED
+        getRelatedEntities(entity, id) {
+            return this.getRelatedEntries(entity, id);
+        };
+
+        getRelatedEntries(entity, id) {
+            return internal.GetRelatedEntries({ entity, id });
+        };
+
+        // DEPRECATED
+        recursiveDeleteEntity(entity, id) {
+            return this.recursiveDeleteEntry(entity, id);
+        };
+
+        recursiveDeleteEntry(entity, id) {
+            return internal.RecursiveDeleteEntry({ entity, id });
+        };
+
+        runCommand(command, args) {
+            return internal.RunCommand({ command, args });
+        };
+
+        deferConstraints(func) {
+            return internal.DeferConstraints(func);
+        };
+
+        pretendRole(asRole, func) {
+            return internal.PretendRole({ asRole }, func);
+        };
+
+        getDomainValues(entity, id, chunk) {
+            return internal.GetDomainValues({ entity, id, chunk });
+        };
+
+        writeEvent(details) {
+            return internal.WriteEvent({ details });
+        };
+
+        writeEventSync(details) {
+            return internal.WriteEventSync({ details });
+        };
+
+        cancelWith(userData, message) {
+            throw new OzmaDBError({ message, userData });
+        };
+    };
+
+    class OzmaDB1 extends OzmaDBCurrent {
+        // DEPRECATED
+        async insertEntity(entity, fields) {
+            const ret = await this.insertEntry(entity, fields);
+            return ret.id;
+        }
+
+        // DEPRECATED
+        async insertEntities(entity, entries) {
+            const ret = await this.insertEntries(entity, entries);
+            return ret.entries.map(entry => entry.id);
+        }
+
+        // DEPRECATED
+        async updateEntity(entity, id, fields) {
+            const ret = await this.updateEntry(entity, id, fields);
+            return ret.id;
+        };
+
+        // DEPRECATED
+        deleteEntity(entity, id) {
+            return this.deleteEntry(entity, id);
+        };
+
+        // DEPRECATED
+        getRelatedEntities(entity, id) {
+            return this.getRelatedEntries(entity, id);
+        };
+
+        // DEPRECATED
+        recursiveDeleteEntity(entity, id) {
+            return this.recursiveDeleteEntry(entity, id);
+        };
+    };
+
+    globalThis.OzmaDB = new OzmaDB1();
+    // DEPRECATED
+    globalThis.FunDB = globalThis.OzmaDB;
+"""
+
+let private preludeDoc =
+    let info = DocumentInfo("fundb_prelude.js", Category=ModuleCategory.Standard)
+    RuntimeLocal(fun runtime -> runtime.Runtime.Compile(info, preludeSource))
+
+[<DefaultScriptUsage(ScriptAccess.None)>]
+type APIProxy (engine : JSEngine) as this =
     let mutable currentHandle = None : APIHandle option
-    let mutable errorConstructor = None : Value.Function option
-    let mutable runtime = Unchecked.defaultof<IJSRuntime>
 
-    let throwCallErrorWithInner (context : Context) (innerException : exn) : StringFormat<'a, 'b> -> 'a =
+    do
+        engine.Engine.AddHostObject("apiProxy", this)
+        ignore <| engine.Engine.Evaluate(preludeDoc.GetValue(engine.Runtime))
+    let errorConstructor = engine.Engine.Global.["OzmaDBError"] :?> IJavaScriptObject
+
+    member inline private this.ThrowErrorWithInner (e : #IErrorDetails) (innerException : exn) : 'b =
+        let body = engine.Json.Serialize(e)
+        let exc = errorConstructor.Invoke(true, body) :?> IJavaScriptObject
+        raise <| JSException(e.Message, exc, innerException)
+
+    member inline private this.ThrowError (e : #IErrorDetails) : 'b =
+        this.ThrowErrorWithInner e null
+
+    member private this.FormatErrorWithInner (innerException : exn) format =
         let thenRaise str =
-            let handle = Option.get currentHandle
-            throwErrorWithInner handle context (ACECall str) innerException
-        kprintf thenRaise
+            this.ThrowErrorWithInner (ACECall str) innerException
+        ksprintf thenRaise format
 
-    let throwCallError (context : Context) = throwCallErrorWithInner context null
+    member private this.FormatError format =
+        this.FormatErrorWithInner null format
 
-    let jsDeserialize (context : Context) (v : Value.Value) : 'a =
+    member private this.Deserialize (v : obj) : 'a =
         let ret =
             try
                 V8JsonReader.Deserialize<'a>(v)
             with
             | :? JsonException as e ->
-                throwCallErrorWithInner context e "Failed to parse value: %s" e.Message
+                this.FormatErrorWithInner e "Failed to parse value: %s" e.Message
         if isRefNull ret then
-            throwCallError context "Value must not be null"
+            this.FormatError "Value must not be null"
         ret
 
-    let jsInt (context : Context) (v : Value.Value) =
-        match v.Data with
-        | :? double as d -> int d
-        | _ -> throwCallError context "Unexpected value type: %O, expected number" v.ValueType
+    member private this.GetHandle () =
+        match currentHandle with
+        | Some handle -> handle
+        | None -> this.FormatError "This API call cannot be used in this context"
 
-    let jsString (context : Context) (v : Value.Value) =
-        match v.Data with
-        | :? Value.String as s -> s.Get()
-        | _ -> throwCallError context "Unexpected value type: %O, expected string" v.ValueType
+    member inline private this.WrapApiCall<'Result, 'Error when 'Error :> IErrorDetails> ([<InlineIfLambda>] wrap : APIHandle -> (unit -> Task<'Result>) -> Task<Result<'Result, 'Error>>) ([<InlineIfLambda>] f : APIHandle -> Task<'Result>) : Task<'Result> =
+        task {
+            let handle = this.GetHandle ()
+            do! handle.Lock.WaitAsync()
+            let! ret =
+                task {
+                    try
+                        return! wrap handle <| fun () ->
+                            task {
+                                handle.Lock.Release()
+                                let! ret =
+                                    task {
+                                        try
+                                            return! f handle
+                                        with
+                                        | e ->
+                                            do! handle.Lock.WaitAsync()
+                                            return reraise' e
+                                    }
+                                do! handle.Lock.WaitAsync()
+                                return ret
+                            }
+                    finally
+                        handle.Lock.Release()
+                }
+            match ret with
+            | Ok r -> return r
+            | Error e -> return this.ThrowError e
+        }
 
-    let template =
-        let template = ObjectTemplate.New(isolate)
+    member inline private this.RunVoidApiCall ([<InlineIfLambda>] f : APIHandle -> Task) : Task =
+        let handle = this.GetHandle ()
+        let task =
+            Task.lock handle.Lock <| fun () ->
+                handle.StackLock <| fun () ->
+                    task {
+                        do! f handle
+                        return ()
+                    }
+        task :> Task
 
-        let fundbTemplate = ObjectTemplate.New(isolate)
-        template.Set("fundbInternal", fundbTemplate)
+    member inline private this.RunResultApiCall<'a, 'e when 'e :> IErrorDetails> ([<InlineIfLambda>] f : APIHandle -> Task<Result<'a, 'e>>) : Task<obj> =
+        task {
+            let handle = this.GetHandle ()
+            let! res = Task.lock handle.Lock <| fun () -> handle.StackLock <| fun () -> f handle
+            match res with
+            | Ok r -> return engine.Json.Serialize(r)
+            | Error e -> return this.ThrowError e
+        }
 
-        fundbTemplate.Set("formatOzmaQLName", FunctionTemplate.New(template.Isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 1 then
-                throwCallError context "Number of arguments must be 1"
-            let ret = args.[0].GetString().Get() |> renderOzmaQLName
-            Value.String.New(template.Isolate, ret).Value
-        ))
+    member inline private this.RunVoidResultApiCall<'e when 'e :> IErrorDetails> ([<InlineIfLambda>] f : APIHandle -> Task<Result<unit, 'e>>) : Task =
+        unitTask {
+            let handle = this.GetHandle ()
+            let! ret = Task.lock handle.Lock <| fun () -> handle.StackLock <| fun () -> f handle
+            match ret with
+            | Ok r -> ()
+            | Error e -> this.ThrowError e
+        }
 
-        fundbTemplate.Set("formatOzmaQLValue", FunctionTemplate.New(template.Isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 1 then
-                throwCallError context "Number of arguments must be 1"
-            use reader = new V8JsonReader(args.[0])
+    member inline private this.SimpleApiCall (arg : obj) ([<InlineIfLambda>] f : APIHandle -> 'Request -> Task<Result<'Response, 'Error>>) =
+        engine.WrapAsyncHostFunction <| fun () ->
+            let req = this.Deserialize arg : 'Request
+            this.RunResultApiCall <| fun handle -> f handle req
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.FormatOzmaQLName (name : string) =
+        engine.WrapHostFunction <| fun () -> renderOzmaQLName name
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.FormatOzmaQLValue (arg : obj) =
+        engine.WrapHostFunction <| fun () ->
+            use reader = new V8JsonReader(arg)
             let source =
                 try
                     JToken.Load(reader)
                 with
-                | :? JsonReaderException as e -> throwCallError context "Failed to parse value: %s" e.Message
-            let ret =
-                try
-                    renderOzmaQLJson source
-                with
-                | Failure msg -> throwCallError context "%s" msg
-            Value.String.New(template.Isolate, ret).Value
-        ))
+                | :? JsonReaderException as e -> this.FormatError "Failed to parse value: %s" e.Message
+            try
+                renderOzmaQLJson source
+            with
+            | Failure msg -> this.FormatError "%s" msg
 
-        let simpleApiCallTemplate (f : APIHandle -> 'Request -> Task<Result<'Response, 'Error>>) =
-            FunctionTemplate.New(isolate, fun args ->
-                let context = isolate.CurrentContext
-                if args.Length <> 1 then
-                    throwCallError context "Number of arguments must be 1"
-                let req = jsDeserialize context args.[0] : 'Request
-                let handle = Option.get currentHandle
-                let run = runResultApiCall handle context <| fun () -> f handle req
-                runtime.EventLoop.NewPromise(context, run).Value
-            )
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.GetUserView arg = this.SimpleApiCall arg (fun handle -> handle.API.UserViews.GetUserView)
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.GetUserViewInfo arg = this.SimpleApiCall arg (fun handle -> handle.API.UserViews.GetUserViewInfo)
 
-        fundbTemplate.Set("getUserView", simpleApiCallTemplate (fun handle -> handle.API.UserViews.GetUserView))
-        fundbTemplate.Set("getUserViewInfo", simpleApiCallTemplate (fun handle -> handle.API.UserViews.GetUserViewInfo))
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.GetEntityInfo arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.GetEntityInfo)
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.InsertEntries arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.InsertEntries)
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.UpdateEntry arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.UpdateEntry)
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.GeleteEntry arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.DeleteEntry)
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.GetRelatedEntries arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.GetRelatedEntries)
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.RecursiveDeleteEntry arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.RecursiveDeleteEntry)
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.RunCommand arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.RunCommand)
 
-        fundbTemplate.Set("getEntityInfo", simpleApiCallTemplate (fun handle -> handle.API.Entities.GetEntityInfo))
-        fundbTemplate.Set("insertEntries", simpleApiCallTemplate (fun handle -> handle.API.Entities.InsertEntries))
-        fundbTemplate.Set("updateEntry", simpleApiCallTemplate (fun handle -> handle.API.Entities.UpdateEntry))
-        fundbTemplate.Set("deleteEntry", simpleApiCallTemplate (fun handle -> handle.API.Entities.DeleteEntry))
-        fundbTemplate.Set("getRelatedEntries", simpleApiCallTemplate (fun handle -> handle.API.Entities.GetRelatedEntries))
-        fundbTemplate.Set("recursiveDeleteEntry", simpleApiCallTemplate (fun handle -> handle.API.Entities.RecursiveDeleteEntry))
-        fundbTemplate.Set("runCommand", simpleApiCallTemplate (fun handle -> handle.API.Entities.RunCommand))
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.DeferConstraints (f : IJavaScriptObject) =
+        engine.WrapAsyncHostFunction <| fun () ->
+            this.WrapApiCall (fun handle -> handle.API.Entities.DeferConstraints) <|
+                fun handle -> engine.RunAsyncJSFunction(f, [||]) 
 
-        fundbTemplate.Set("deferConstraints", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 1 then
-                throwCallError context "Number of arguments must be 1"
-            let func = args.[0].GetFunction()
-            let handle = Option.get currentHandle
-            let run () = wrapApiCall handle context handle.API.Entities.DeferConstraints (fun () -> func.CallAsync(null))
-            runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
-        ))
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.PretendRole (req : obj) (f : IJavaScriptObject) =
+        engine.WrapAsyncHostFunction <| fun () ->
+            let req = this.Deserialize req : PretendRoleRequest
+            this.WrapApiCall  (fun handle -> handle.API.Request.PretendRole req) <|
+                fun handle -> engine.RunAsyncJSFunction(f, [||])
 
-        fundbTemplate.Set("pretendRole", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 2 then
-                throwCallError context "Number of arguments must be 2"
-            let req = jsDeserialize context args.[0] : PretendRoleRequest
-            let func = args.[1].GetFunction()
-            let handle = Option.get currentHandle
-            let run () = wrapApiCall handle context (handle.API.Request.PretendRole req) (fun () -> func.CallAsync(null))
-            runtime.EventLoop.NewPromise(context, Func<_>(run)).Value
-        ))
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.GetDomainValues arg = this.SimpleApiCall arg (fun handle -> handle.API.Domains.GetDomainValues)
 
-        fundbTemplate.Set("getDomainValues", simpleApiCallTemplate (fun handle -> handle.API.Domains.GetDomainValues))
-
-        fundbTemplate.Set("writeEvent", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 1 then
-                throwCallError context "Number of arguments must be 1"
-            let req = jsDeserialize context args.[0] : WriteEventRequest
-            let handle = Option.get currentHandle
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.WriteEvent (arg : obj) =
+        engine.WrapHostFunction <| fun () ->
+            let req = this.Deserialize arg : WriteEventRequest
+            let handle = this.GetHandle ()
             handle.Logger.LogInformation("Source {source} wrote event from JavaScript: {details}", handle.API.Request.Source, req.Details.ToString())
             handle.API.Request.WriteEvent (fun event ->
                 event.Type <- "writeEvent"
                 event.Request <- JsonConvert.SerializeObject req
             )
-            Value.Undefined.New(isolate)
-        ))
+            Undefined.Value
 
-        fundbTemplate.Set("writeEventSync", FunctionTemplate.New(isolate, fun args ->
-            let context = isolate.CurrentContext
-            if args.Length <> 1 then
-                throwCallError context "Number of arguments must be 1"
-            let req = jsDeserialize context args.[0] : WriteEventRequest
-            let handle = Option.get currentHandle
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.WriteEventSync (arg : obj) =
+        let req = this.Deserialize arg : WriteEventRequest
+        this.RunVoidApiCall <| fun handle ->
             handle.Logger.LogInformation("Source {source} wrote sync event from JavaScript: {details}", handle.API.Request.Source, req.Details.ToString())
-            let run = runVoidApiCall handle context <| fun () ->
-                handle.API.Request.WriteEventSync (fun event ->
-                    event.Type <- "writeEvent"
-                    event.Request <- JsonConvert.SerializeObject req
-                )
-            runtime.EventLoop.NewPromise(context, run).Value
-        ))
-
-        template
-
-    let preludeScriptSource = "
-(() => {
-const internal = global.fundbInternal;
-delete global.fundbInternal;
-
-const findInnerByKey = (object, key) => {
-    for (value of Object.values(object)) {
-        if (typeof value === 'object' && value) {
-            const currValue = object[key];
-            if (currValue !== undefined) {
-                return currValue;
-            }
-            const nestedValue = findInnerByKey(value, key);
-            if (nestedValue !== undefined) {
-                return nestedValue;
-            }
-        }
-    }
-};
-
-class OzmaDBError extends Error {
-  constructor(body) {
-    super(body.message);
-    Object.assign(this, body);
-    // Find `userData` and bring it to the top-level.
-    if (!('userData' in body)) {
-        const userData = findInnerByKey(body, 'userData');
-        if (userData !== undefined) {
-            this.userData = userData;
-        }
-    }
-  }
-};
-
-global.OzmaDBError = OzmaDBError;
-
-global.formatDate = (date) => date.toISOString().split('T')[0];
-global.formatOzmaQLName = internal.formatOzmaQLName;
-global.formatOzmaQLValue = internal.formatOzmaQLValue;
-
-// DEPRECATED
-global.renderDate = global.formatDate;
-global.renderOzmaQLName = global.formatOzmaQLName;
-global.renderOzmaQLValue = global.formatOzmaQLValue;
-
-const normalizeSource = (source) => {
-    if (source.ref) {
-        return { ...source, ...source.ref };
-    } else {
-        return source;
-    }
-};
-
-class OzmaDBCurrent {
-    constructor() {
-        Object.freeze(this);
-    }
-
-    getUserView(source, args, chunk) {
-        return internal.getUserView({ source: normalizeSource(source), args, chunk });
-    };
-
-    getUserViewInfo(source) {
-        return internal.getUserViewInfo({ source: normalizeSource(source) });
-    };
-
-    getEntityInfo(entity) {
-        return internal.getEntityInfo({ entity });
-    };
-
-    async insertEntry(entity, fields) {
-        try {
-            const ret = await this.insertEntries(entity, [fields]);
-            return ret.entries[0];
-        } catch (e) {
-            if (e.error === 'transaction') {
-                // We want to keep the stack trace, so we mutate the exception.
-                const inner = e.inner;
-                delete e.operation;
-                delete e.inner;
-                Object.assign(e, inner);
-            }
-            throw e;
-        }
-    };
-
-    // DEPRECATED
-    async insertEntities(entity, entries) {
-        const ret = await this.insertEntries(entity, entries);
-        return ret.entries.map(entry => entry.id);
-    }
-
-    insertEntries(entity, entries) {
-        return internal.insertEntries({ entity, entries });
-    };
-
-    // DEPRECATED
-    async updateEntity(entity, id, fields) {
-        const ret = await this.updateEntry(entity, id, fields);
-        return ret.id;
-    };
-
-    updateEntry(entity, id, fields) {
-        return internal.updateEntry({ entity, id, fields });
-    };
-
-    // DEPRECATED
-    deleteEntity(entity, id) {
-        return this.deleteEntry(entity, id);
-    };
-
-    deleteEntry(entity, id) {
-        return internal.deleteEntry({ entity, id });
-    };
-
-    // DEPRECATED
-    getRelatedEntities(entity, id) {
-        return this.getRelatedEntries(entity, id);
-    };
-
-    getRelatedEntries(entity, id) {
-        return internal.getRelatedEntries({ entity, id });
-    };
-
-    // DEPRECATED
-    recursiveDeleteEntity(entity, id) {
-        return this.recursiveDeleteEntry(entity, id);
-    };
-
-    recursiveDeleteEntry(entity, id) {
-        return internal.recursiveDeleteEntry({ entity, id });
-    };
-
-    runCommand(command, args) {
-        return internal.runCommand({ command, args });
-    };
-
-    deferConstraints(func) {
-        return internal.deferConstraints(func);
-    };
-
-    pretendRole(asRole, func) {
-        return internal.pretendRole({ asRole }, func);
-    };
-
-    getDomainValues(entity, id, chunk) {
-        return internal.getDomainValues({ entity, id, chunk });
-    };
-
-    writeEvent(details) {
-        return internal.writeEvent({ details });
-    };
-
-    writeEventSync(details) {
-        return internal.writeEventSync({ details });
-    };
-
-    cancelWith(userData, message) {
-        throw new OzmaDBError({ message, userData });
-    };
-};
-
-class OzmaDB1 extends OzmaDBCurrent {
-    // DEPRECATED
-    async insertEntity(entity, fields) {
-        const ret = await this.insertEntry(entity, fields);
-        return ret.id;
-    }
-
-    // DEPRECATED
-    async insertEntities(entity, entries) {
-        const ret = await this.insertEntries(entity, entries);
-        return ret.entries.map(entry => entry.id);
-    }
-
-    // DEPRECATED
-    async updateEntity(entity, id, fields) {
-        const ret = await this.updateEntry(entity, id, fields);
-        return ret.id;
-    };
-
-    // DEPRECATED
-    deleteEntity(entity, id) {
-        return this.deleteEntry(entity, id);
-    };
-
-    // DEPRECATED
-    getRelatedEntities(entity, id) {
-        return this.getRelatedEntries(entity, id);
-    };
-
-    // DEPRECATED
-    recursiveDeleteEntity(entity, id) {
-        return this.recursiveDeleteEntry(entity, id);
-    };
-};
-
-global.OzmaDB = new OzmaDB1();
-})();
-    "
-    let preludeScript = UnboundScript.Compile(Value.String.New(isolate, preludeScriptSource.Trim()), ScriptOrigin("fundb_prelude.js"))
-
-    member this.Isolate = isolate
+            handle.API.Request.WriteEventSync (fun event ->
+                event.Type <- "writeEvent"
+                event.Request <- JsonConvert.SerializeObject req
+            )
 
     member this.SetAPI (api : IOzmaDBAPI) =
         assert (Option.isNone currentHandle)
-        currentHandle <- Some <| APIHandle(api, Option.get errorConstructor)
+        currentHandle <- Some <| APIHandle(api)
 
     member this.ResetAPI api =
         currentHandle <- None
 
-    interface IJavaScriptTemplate with
-        member this.ObjectTemplate = template
-        member this.FinishInitialization newRuntime context =
-            runtime <- newRuntime
-            let p = preludeScript.Bind(context)
-            ignore <| p.Run()
-            errorConstructor <- Some <| context.Global.Get("OzmaDBError").GetFunction()
+    member this.Engine = engine

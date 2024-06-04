@@ -59,7 +59,7 @@ namespace OzmaDBSchema.PgCatalog
                 .HasNoKey();
 
             modelBuilder.Entity<Index>()
-                .Property<string[]>("IndExprs");
+                .Property<string>("IndExprs");
             modelBuilder.Entity<Index>()
                 .Property<string>("IndPred");
 

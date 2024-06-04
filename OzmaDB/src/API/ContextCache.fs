@@ -15,7 +15,7 @@ open Microsoft.Extensions.ObjectPool
 open FluidCaching
 open Npgsql
 open FSharp.Control.Tasks.Affine
-open NetJs
+open Microsoft.ClearScript.V8
 
 open OzmaDBSchema.System
 open OzmaDB.OzmaUtils
@@ -107,10 +107,10 @@ type private CachedContext =
       DefaultAttrs : MergedDefaultAttributes
       Domains : LayoutDomains
       Actions : ResolvedActions
-      JSRuntime : IsolateLocal<JSRuntime<APITemplate>>
-      ActionScripts : IsolateLocal<PreparedActions>
+      APIProxy : RuntimeLocal<APIProxy>
+      ActionScripts : RuntimeLocal<PreparedActions>
       Triggers : MergedTriggers
-      TriggerScripts : IsolateLocal<PreparedTriggers>
+      TriggerScripts : RuntimeLocal<PreparedTriggers>
       SystemViews : SourceUserViews
       UserMeta : SQL.DatabaseMeta
     }
@@ -154,17 +154,23 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
     let currentDatabaseVersion = sprintf "%s %s" (assemblyHash.Force()) cacheParams.Preload.Hash
 
-    let jsIsolates =
+    let jsRuntimes =
         let policy =
-            { new IPooledObjectPolicy<Isolate> with
+            { new IPooledObjectPolicy<JSRuntime> with
                   member this.Create () =
-                      let isolate = Isolate.NewWithHeapSize(4UL * 1024UL, 32UL * 1024UL * 1024UL)
-                      isolate.TerminateOnException <- true
-                      isolate.WrapCallbackExceptions <- true
-                      isolate
-                  member this.Return isolate =
-                      assert (isNull isolate.CurrentContext)
-                      not isolate.WasNearHeapLimit
+                      let maxHeapSize = 32 * 1024 * 1024
+                      let maxStackSize = 16 * 1024 * 1024
+                      let constraints = new V8RuntimeConstraints(
+                          MaxArrayBufferAllocation = 0UL,
+                          HeapExpansionMultiplier = 2,
+                          MaxOldSpaceSize = maxHeapSize
+                      )
+                      let runtime = JSRuntime constraints
+                      runtime.Runtime.MaxHeapSize <- UIntPtr.CreateChecked maxHeapSize
+                      runtime.Runtime.MaxStackUsage <- UIntPtr.CreateChecked maxStackSize
+                      runtime
+                  member this.Return runtime =
+                      not runtime.MetMemoryLimit
             }
         DefaultObjectPool(policy, Environment.ProcessorCount)
 
@@ -264,18 +270,19 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
             | _ -> ()
         }
 
-    let makeRuntime files forceAllowBroken = IsolateLocal(fun isolate ->
+    let makeAPIProxies files = RuntimeLocal(fun runtime ->
         let env =
             { Files = files
               SearchPath = seq { moduleDirectory }
             }
-        JSRuntime(isolate, APITemplate, env, forceAllowBroken)
+        let engine = JSEngine(runtime, env)
+        APIProxy(engine)
     )
 
     let rec finishColdRebuild (transaction : DatabaseTransaction) (layout : Layout) (userMeta : SQL.DatabaseMeta) (isChanged : bool) (cancellationToken : CancellationToken) : Task<CachedState> = task {
-        let isolate = jsIsolates.Get()
+        let isolate = jsRuntimes.Get()
         try
-            let! (currentVersion, jsRuntime, mergedAttrs, triggers, mergedTriggers, permissions, actions, sourceViews, userViews) =
+            let! (currentVersion, apiProxy, mergedAttrs, triggers, mergedTriggers, permissions, actions, sourceViews, userViews) =
                 task {
                     try
                         let systemViews = preloadUserViews preload
@@ -285,18 +292,18 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         let! sourceModules = buildSchemaModules transaction.System None cancellationToken
                         let modules = resolveModules layout sourceModules true
 
-                        let jsRuntime = makeRuntime (moduleFiles modules) true
-                        let jsApi = jsRuntime.GetValue isolate
-                        let modules = resolvedLoadedModules modules jsApi
+                        let apiProxies = makeAPIProxies (moduleFiles modules)
+                        let apiProxy = apiProxies.GetValue isolate
+                        let modules = resolvedLoadedModules modules apiProxy.Engine true
                         do! checkBrokenModules logger cacheParams.AllowAutoMark preload transaction modules cancellationToken
 
                         let! sourceTriggers = buildSchemaTriggers transaction.System None cancellationToken
                         let triggers = resolveTriggers layout true sourceTriggers
-                        let triggerScripts = prepareTriggers jsApi true triggers
+                        let triggerScripts = prepareTriggers apiProxy.Engine true triggers
                         let mergedTriggers = mergeTriggers layout triggers
                         do! checkBrokenTriggers logger cacheParams.AllowAutoMark preload transaction triggerScripts cancellationToken
 
-                        let generatedViews = generateUserViews jsApi layout mergedTriggers true sourceViews cancellationToken
+                        let generatedViews = generateUserViews apiProxy.Engine layout mergedTriggers true sourceViews cancellationToken
                         let sourceViews = generatedUserViewsSource sourceViews generatedViews
                         let! userViewsUpdate = updateUserViews transaction.System sourceViews cancellationToken
 
@@ -308,11 +315,11 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                         let userViews = resolveUserViews layout mergedAttrs true generatedViews
 
-                        let jsApi = jsRuntime.GetValue isolate
+                        let apiProxy = apiProxies.GetValue isolate
 
                         let! sourceActions = buildSchemaActions transaction.System None cancellationToken
                         let actions = resolveActions layout true sourceActions
-                        let preparedActions = prepareActions jsApi true actions
+                        let preparedActions = prepareActions apiProxy.Engine true actions
                         do! checkBrokenActions logger cacheParams.AllowAutoMark preload transaction preparedActions cancellationToken
 
                         let! sourcePermissions = buildSchemaPermissions transaction.System None cancellationToken
@@ -325,7 +332,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                         // To dry-run user views we need to stop the transaction.
                         let! _ = transaction.Commit (cancellationToken)
-                        return (currentVersion, jsRuntime, mergedAttrs, triggers, mergedTriggers, permissions, actions, sourceViews, userViews)
+                        return (currentVersion, apiProxies, mergedAttrs, triggers, mergedTriggers, permissions, actions, sourceViews, userViews)
                     with
                     | ex ->
                         do! transaction.Rollback ()
@@ -350,11 +357,11 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         { Layout = layout
                           Permissions = permissions
                           DefaultAttrs = mergedAttrs
-                          JSRuntime = jsRuntime
+                          APIProxy = apiProxy
                           Actions = actions
-                          ActionScripts = IsolateLocal(fun isolate -> prepareActions (jsRuntime.GetValue isolate) false actions)
+                          ActionScripts = RuntimeLocal(fun isolate -> prepareActions (apiProxy.GetValue isolate).Engine false actions)
                           Triggers = mergedTriggers
-                          TriggerScripts = IsolateLocal(fun isolate -> prepareTriggers (jsRuntime.GetValue isolate) false triggers)
+                          TriggerScripts = RuntimeLocal(fun isolate -> prepareTriggers (apiProxy.GetValue isolate).Engine false triggers)
                           UserViews = prefetchedViews
                           Domains = domains
                           SystemViews = systemViews
@@ -367,7 +374,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     do! transaction.Rollback ()
                     return reraise' ex
         finally
-            jsIsolates.Return isolate
+            jsRuntimes.Return isolate
     }
 
     let rec getMigrationLock (transaction : DatabaseTransaction) (cancellationToken : CancellationToken) : Task<bool> =
@@ -471,17 +478,18 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     let actions = resolveActions layout false sourceActions
 
                     let modules = resolveModules layout sourceModules false
-                    let jsRuntime = makeRuntime (moduleFiles modules) false
+                    let apiProxies = makeAPIProxies (moduleFiles modules)
 
+                    let actionScripts = RuntimeLocal(fun isolate -> prepareActions (apiProxies.GetValue isolate).Engine false actions)
+                    let triggerScripts = RuntimeLocal(fun isolate -> prepareTriggers (apiProxies.GetValue isolate).Engine false triggers)
                     do
-                        let myIsolate = jsIsolates.Get ()
+                        let myIsolate = jsRuntimes.Get ()
                         try
-                            let jsApi = jsRuntime.GetValue myIsolate
-                            let actions = prepareActions jsApi false actions
-                            let triggers = prepareTriggers jsApi false triggers
+                            ignore <| actionScripts.GetValue myIsolate
+                            ignore <| triggerScripts.GetValue myIsolate
                             ()
                         finally
-                            jsIsolates.Return myIsolate
+                            jsRuntimes.Return myIsolate
 
                     let permissions = resolvePermissions layout (prefetchedViews.Find >> Option.bind Result.getOption >> Option.isSome) false sourcePermissions
 
@@ -493,11 +501,11 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         { Layout = layout
                           Permissions = permissions
                           DefaultAttrs = mergedAttrs
-                          JSRuntime = jsRuntime
+                          APIProxy = apiProxies
                           Actions = actions
-                          ActionScripts = IsolateLocal(fun isolate -> prepareActions (jsRuntime.GetValue isolate) false actions)
+                          ActionScripts = actionScripts
                           Triggers = mergedTriggers
-                          TriggerScripts = IsolateLocal(fun isolate -> prepareTriggers (jsRuntime.GetValue isolate) false triggers)
+                          TriggerScripts =triggerScripts
                           UserViews = prefetchedViews
                           Domains = domains
                           SystemViews = systemViews
@@ -596,7 +604,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
             try
                 let mutable isDisposed = false
 
-                let isolate = lazy ( jsIsolates.Get() )
+                let isolate = lazy ( jsRuntimes.Get() )
 
                 let mutable forceAllowBroken = false
 
@@ -666,10 +674,10 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 | :? ResolveModulesException as e ->
                                     raise <| ContextException(GEMigration("Failed to resolve modules: " + fullUserMessage e), e)
 
-                            let jsRuntime = makeRuntime (moduleFiles modules) false
-                            let jsApi =
+                            let apiProxies = makeAPIProxies (moduleFiles modules)
+                            let apiProxy =
                                 try
-                                    jsRuntime.GetValue isolate.Value
+                                    apiProxies.GetValue isolate.Value
                                 with
                                 | :? JavaScriptRuntimeException as e ->
                                     raise <| ContextException(GEMigration("Failed to resolve modules: " + fullUserMessage e), e)
@@ -685,7 +693,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                     raise <| ContextException(GEMigration("Failed to resolve actions: " + fullUserMessage e), e)
                             let preparedActions =
                                 try
-                                    prepareActions jsApi forceAllowBroken actions
+                                    prepareActions apiProxy.Engine forceAllowBroken actions
                                 with
                                 | :? ActionRunException as e ->
                                     raise <| ContextException(GEMigration("Failed to resolve actions: " + fullUserMessage e), e)
@@ -703,7 +711,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                     raise <| ContextException(GEMigration("Failed to resolve triggers: " + fullUserMessage e), e)
                             let preparedTriggers =
                                 try
-                                    prepareTriggers jsApi forceAllowBroken triggers
+                                    prepareTriggers apiProxy.Engine forceAllowBroken triggers
                                 with
                                 | :? TriggerRunException as e ->
                                     raise <| ContextException(GEMigration("Failed to resolve triggers: " + fullUserMessage e), e)
@@ -717,7 +725,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                             logger.LogInformation("Updating generated user views")
                             let generatedUserViews =
                                 try
-                                    generateUserViews jsApi layout mergedTriggers forceAllowBroken sourceUserViews cancellationToken
+                                    generateUserViews apiProxy.Engine layout mergedTriggers forceAllowBroken sourceUserViews cancellationToken
                                 with
                                 | :? UserViewGenerateException as e ->
                                     raise <| ContextException(GEMigration("Failed to generate user views: " + fullUserMessage e), e)
@@ -811,11 +819,11 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                                 { Layout = layout
                                   Permissions = permissions
                                   DefaultAttrs = mergedAttrs
-                                  JSRuntime = jsRuntime
+                                  APIProxy = apiProxies
                                   Actions = actions
-                                  ActionScripts = IsolateLocal(fun isolate -> prepareActions (jsRuntime.GetValue isolate) false actions)
+                                  ActionScripts = RuntimeLocal(fun isolate -> prepareActions (apiProxies.GetValue isolate).Engine false actions)
                                   Triggers = mergedTriggers
-                                  TriggerScripts = IsolateLocal(fun isolate -> prepareTriggers (jsRuntime.GetValue isolate) false triggers)
+                                  TriggerScripts = RuntimeLocal(fun isolate -> prepareTriggers (apiProxies.GetValue isolate).Engine false triggers)
                                   UserViews = prefetchedUserViews
                                   Domains = domains
                                   SystemViews = filterSystemViews sourceUserViews
@@ -916,18 +924,18 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     | None ->
                         maybeApi <- Some api
 
-                let jsApi =
+                let apiProxy =
                     lazy (
-                        let jsApi = oldState.Context.JSRuntime.GetValue isolate.Value
-                        jsApi.API.SetAPI (Option.get maybeApi)
-                        jsApi
+                        let apiProxy = oldState.Context.APIProxy.GetValue isolate.Value
+                        apiProxy.SetAPI (Option.get maybeApi)
+                        apiProxy
                     )
 
                 let actionScripts =
                     lazy (
                         let actionScripts = oldState.Context.ActionScripts.GetValue isolate.Value
                         // Initialize JS API.
-                        ignore <| jsApi.Force()
+                        ignore <| apiProxy.Force()
                         actionScripts
                     )
 
@@ -935,7 +943,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                     lazy (
                         let triggerScripts = oldState.Context.TriggerScripts.GetValue isolate.Value
                         // Initialize JS API.
-                        ignore <| jsApi.Force()
+                        ignore <| apiProxy.Force()
                         triggerScripts
                     )
 
@@ -952,7 +960,7 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
                         member this.TransactionTime = transactionTime
                         member this.LoggerFactory = cacheParams.LoggerFactory
                         member this.Preload = preload
-                        member this.Runtime = jsApi.Value :> IJSRuntime
+                        member this.Engine = apiProxy.Value.Engine
 
                         member this.CancellationToken
                             with get () = cancellationToken
@@ -991,20 +999,20 @@ type ContextCacheStore (cacheParams : ContextCacheParams) =
 
                         member this.Dispose () =
                             if not isDisposed then
-                                if jsApi.IsValueCreated then
-                                    jsApi.Value.API.ResetAPI ()
+                                if apiProxy.IsValueCreated then
+                                    apiProxy.Value.ResetAPI ()
                                 if isolate.IsValueCreated then
-                                    jsIsolates.Return isolate.Value
+                                    jsRuntimes.Return isolate.Value
                                 (transaction :> IDisposable).Dispose ()
                                 (transaction.Connection :> IDisposable).Dispose ()
                                 isDisposed <- true
                         member this.DisposeAsync () =
                             unitVtask {
                                 if not isDisposed then
-                                    if jsApi.IsValueCreated then
-                                        jsApi.Value.API.ResetAPI ()
+                                    if apiProxy.IsValueCreated then
+                                        apiProxy.Value.ResetAPI ()
                                     if isolate.IsValueCreated then
-                                        jsIsolates.Return isolate.Value
+                                        jsRuntimes.Return isolate.Value
                                     do! (transaction :> IAsyncDisposable).DisposeAsync ()
                                     do! (transaction.Connection :> IAsyncDisposable).DisposeAsync ()
                                     isDisposed <- true

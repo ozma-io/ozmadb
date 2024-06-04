@@ -53,7 +53,7 @@ type SaveRestoreAPI (api : IOzmaDBAPI) =
         ctx.ScheduleBeforeCommit "update_custom_entities" updateCustomEntities
 
     member this.SaveSchemas (req : SaveSchemasRequest) : Task<Result<SaveSchemasResponse, SaveErrorInfo>> =
-        wrapAPIResult rctx logger "saveSchemas" req <| task {
+        wrapAPIResult rctx logger "saveSchemas" req <| fun () -> task {
             let schemas =
                 match req with
                 | SRSpecified schemas ->
@@ -99,7 +99,7 @@ type SaveRestoreAPI (api : IOzmaDBAPI) =
         }
 
     member this.RestoreSchemas (req : RestoreSchemasRequest) : Task<Result<unit, RestoreErrorInfo>> =
-        wrapUnitAPIResult rctx logger "restoreSchemas" req <| task {
+        wrapUnitAPIResult rctx logger "restoreSchemas" req <| fun () -> task {
             let flags = Option.defaultValue emptyRestoreSchemasFlags req.Flags
             if not (canRestore rctx.User.Effective.Type) then
                 return Error RREAccessDenied
