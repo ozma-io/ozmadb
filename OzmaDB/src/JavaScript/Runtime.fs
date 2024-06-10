@@ -635,7 +635,6 @@ type JSEngine (runtime : JSRuntime, env : JSEnvironment) as this =
             wrappedHostExceptionConstructor.Invoke(true, error)
 
     member this.WrapAsyncHostFunction (f : unit -> Task<'a>) =
-        // Getting it in `InternalPushAsyncJob` results in an internal engine deadlock.
         let stack = engine.GetStackTrace()
         wrappedHostPromiseConstructor.Invoke(true, Func<_, _, _>(fun (resolve : IJavaScriptObject) (reject : IJavaScriptObject) ->
             ignore <| unitTask {
