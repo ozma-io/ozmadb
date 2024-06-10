@@ -326,6 +326,7 @@ type JSEngine (runtime : JSRuntime, env : JSEnvironment) as this =
     let enrichedExceptionsMap = engine.Global.["enrichedExceptionsMap"] :?> IJavaScriptObject
     do
         ignore <| engine.Global.DeleteProperty("WrappedHostException")
+        ignore <| engine.Global.DeleteProperty("WrappedHostPromise")
         ignore <| engine.Global.DeleteProperty("enrichedExceptionsMap")
 
     let mutable currentJSExceptionsMap : IJavaScriptObject option = None
