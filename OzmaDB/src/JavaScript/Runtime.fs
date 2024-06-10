@@ -334,7 +334,7 @@ type JSEngine (runtime : JSRuntime, env : JSEnvironment) as this =
     let mutable currentCancellationToken : CancellationToken option = None
     let exceptionsMap = ConditionalWeakTable<exn, IJavaScriptObject> ()
 
-    let stackTracesStack = AsyncLocal<(TaskCompletionSource * string) list>()
+    let stackTracesStack = AsyncLocal<string list>()
     let pendingTasks = AsyncLocal<Collections.Generic.HashSet<Task>>()
 
 
@@ -467,14 +467,11 @@ type JSEngine (runtime : JSRuntime, env : JSEnvironment) as this =
                 []
             else
                 stackTracesStack.Value
-        stackTracesStack.Value <- (finish, stack) :: oldStack
+        stackTracesStack.Value <- stack :: oldStack
         ignore <| pendingTasks.Value.Add(finish.Task)
         finish
 
     member this.InternalPopAsyncJob (finish : TaskCompletionSource) =
-        match stackTracesStack.Value with
-        | (oldFinish, _) :: _ when finish = oldFinish -> ()
-        | _ -> failwith "Internal error: mismatched async jobs"
         ignore <| pendingTasks.Value.Remove(finish.Task)
         finish.SetResult()
 
@@ -485,7 +482,7 @@ type JSEngine (runtime : JSRuntime, env : JSEnvironment) as this =
         else 
             seq {
                 yield stack
-                yield! stackTracesStack.Value |> Seq.map snd
+                yield! stackTracesStack.Value
             }
             |> String.concat ",\n"
 
