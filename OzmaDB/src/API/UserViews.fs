@@ -105,7 +105,7 @@ type UserViewsAPI (api : IOzmaDBAPI) =
         }
 
     member this.GetUserViewInfo (req : UserViewInfoRequest) : Task<Result<UserViewInfoResponse, UserViewErrorInfo>> =
-        wrapAPIResult rctx logger "getUserViewInfo" req <| fun () -> task {
+        wrapAPIResult rctx "getUserViewInfo" req <| fun () -> task {
             let flags = Option.defaultValue emptyUserViewFlags req.Flags
             match! resolveSource req.Source flags with
             | Error e -> return Error e
@@ -127,7 +127,7 @@ type UserViewsAPI (api : IOzmaDBAPI) =
         }
 
     member this.GetUserViewExplain (req : UserViewExplainRequest) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
-        wrapAPIResult rctx logger "getUserViewExplain" req <| fun () -> task {
+        wrapAPIResult rctx "getUserViewExplain" req <| fun () -> task {
             if not (canExplain rctx.User.Saved.Type) then
                 logger.LogError("Explain access denied")
                 return Error (UVEAccessDenied "Explain access denied")
@@ -173,7 +173,7 @@ type UserViewsAPI (api : IOzmaDBAPI) =
         }
 
     member this.GetUserView (req : UserViewRequest) : Task<Result<UserViewEntriesResponse, UserViewErrorInfo>> =
-        wrapAPIResult rctx logger "getUserView" req <| fun () -> task {
+        wrapAPIResult rctx "getUserView" req <| fun () -> task {
             let flags = Option.defaultValue emptyUserViewFlags req.Flags
             match! resolveSource req.Source flags with
             | Error e -> return Error e

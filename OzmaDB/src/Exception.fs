@@ -16,7 +16,6 @@ type IUserException =
 // which we'd like to format with a JavaScript stack trace.
 type ICustomFormatException =
     abstract member MessageContainsInnerError : bool
-    abstract member ShortMessage : string
 
 let rec isUserException (e : exn) =
     match box e with

@@ -15,7 +15,7 @@ type ActionsAPI (api : IOzmaDBAPI) =
     let logger = ctx.LoggerFactory.CreateLogger<ActionsAPI>()
 
     member this.RunAction (req : RunActionRequest) : Task<Result<ActionResponse, ActionErrorInfo>> =
-        wrapAPIResult rctx logger "runAction" req <| fun () -> task {
+        wrapAPIResult rctx "runAction" req <| fun () -> task {
             match ctx.FindAction(req.Action) with
             | None ->
                 let msg = sprintf "Action %O not found" req.Action

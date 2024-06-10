@@ -268,6 +268,7 @@ type IRequestContext =
     abstract GlobalArguments : LocalArgumentsMap with get
     abstract Source : EventSource with get
     abstract Quota : RequestQuota with get
+    abstract Logger : ILogger with get
 
     abstract member WriteEvent : (EventEntry -> unit) -> unit
     abstract member WriteEventSync : (EventEntry -> unit) -> Task
@@ -1015,25 +1016,30 @@ let logAPIResponse<'Request, 'Response when 'Response :> ILoggableResponse>
         (request : 'Request)
         (response : 'Response) =
     task {
+        let responseStr = JsonConvert.SerializeObject response
         if response.ShouldLog then
             do! rctx.WriteEventSync (fun event ->
                 event.Type <- name
                 event.Request <- JsonConvert.SerializeObject request
-                event.Response <- JsonConvert.SerializeObject response
+                event.Response <- responseStr
                 event.Details <- JsonConvert.SerializeObject response.Details
             )
+        rctx.Logger.LogInformation("Request {name} from {source} is finished with result {}", name, rctx.Source, responseStr)
     }
 
 let logAPISuccess<'Request>
         (rctx : IRequestContext)
         (name : string)
         (request : 'Request) =
-    rctx.WriteEventSync (fun event ->
-        event.Type <- name
-        event.Request <- JsonConvert.SerializeObject request
-        event.Response <- "{}"
-        event.Details <- "{}"
-    )
+    unitTask {
+        do! rctx.WriteEventSync (fun event ->
+            event.Type <- name
+            event.Request <- JsonConvert.SerializeObject request
+            event.Response <- "{}"
+            event.Details <- "{}"
+        )
+        rctx.Logger.LogInformation("Request {name} from {source} is finished", name, rctx.Source)
+    }
 
 let logAPIError<'Request, 'Error when 'Error :> IErrorDetails>
         (rctx : IRequestContext)
@@ -1084,19 +1090,18 @@ let logAPIIfError<'Request, 'Response, 'Error when 'Error :> IErrorDetails>
         | Error error -> logAPIError rctx name request error
     }
 
-let logAPIRequest<'Request> (rctx : IRequestContext) (logger : ILogger) (name :string) (request : 'Request) =
+let logAPIRequest<'Request> (rctx : IRequestContext) (name :string) (request : 'Request) =
     let args = JsonConvert.SerializeObject request
-    logger.LogInformation("Request {name} from {source} started with arguments {args}", name, rctx.Source, args)
+    rctx.Logger.LogInformation("Request {name} from {source} started with arguments {args}", name, rctx.Source, args)
 
 let inline wrapAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggableResponse and 'Error :> IErrorDetails>
         (rctx : IRequestContext)
-        (logger : ILogger)
         (name : string)
         (request : 'Request)
         ([<InlineIfLambda>] f : unit -> Task<Result<'Response, 'Error>>)
         : Task<Result<'Response, 'Error>> =
     task {
-        logAPIRequest rctx logger name request
+        logAPIRequest rctx name request
         let! result = f ()
         do! logAPIResult rctx name request result
         return result
@@ -1104,13 +1109,12 @@ let inline wrapAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggable
 
 let inline wrapUnitAPIResult<'Request, 'Error when 'Error :> IErrorDetails>
         (rctx : IRequestContext)
-        (logger : ILogger)
         (name : string)
         (request : 'Request)
         ([<InlineIfLambda>] f : unit -> Task<Result<unit, 'Error>>)
         : Task<Result<unit, 'Error>> =
     task {
-        logAPIRequest rctx logger name request
+        logAPIRequest rctx name request
         let! result = f ()
         do! logUnitAPIResult rctx name request result
         return result
@@ -1118,13 +1122,12 @@ let inline wrapUnitAPIResult<'Request, 'Error when 'Error :> IErrorDetails>
 
 let inline wrapAPIError<'Request, 'Response, 'Error when 'Error :> IErrorDetails>
         (rctx : IRequestContext)
-        (logger : ILogger)
         (name : string)
         (request : 'Request)
         ([<InlineIfLambda>] f : unit -> Task<Result<'Response, 'Error>>)
         : Task<Result<'Response, 'Error>> =
     task {
-        logAPIRequest rctx logger name request
+        logAPIRequest rctx name request
         let! result = f ()
         do! logAPIIfError rctx name request result
         return result

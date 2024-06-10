@@ -1,6 +1,7 @@
 module OzmaDB.API.JavaScript
 
 open Printf
+open System.Threading
 open System.Threading.Tasks
 open System.Runtime.Serialization
 open Microsoft.Extensions.Logging
@@ -9,6 +10,7 @@ open Microsoft.ClearScript.JavaScript
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open FSharp.Control.Tasks.Affine
+open Nito.AsyncEx
 
 open OzmaDB.OzmaUtils
 open OzmaDB.OzmaUtils.Serialization.Utils
@@ -51,20 +53,23 @@ type WriteEventRequest =
 
 type private APIHandle (api : IOzmaDBAPI) =
     let logger = api.Request.Context.LoggerFactory.CreateLogger<APIHandle>()
-    let mutable lock = Task.AsyncSemaphore(1)
+    let mutable lock = AsyncLocal<AsyncLock>()
+    do
+        lock.Value <- AsyncLock()
 
     member this.API = api
     member this.Logger = logger
-    member this.Lock = lock
+
+    member this.Lock () = lock.Value.LockAsync(api.Request.Context.CancellationToken)
+    member this.UncancellableLock () = lock.Value.LockAsync()
+
+
     // We need to support stacking the locks because API functions may call back into JavaScript.
     member inline this.StackLock (f : unit -> Task<'a>) : Task<'a> =
         task {
-            let oldLock = lock
-            lock <- Task.AsyncSemaphore(1)
-            try
-                return! f ()
-            finally
-                lock <- oldLock
+            use! guard = this.Lock()
+            lock.Value <- AsyncLock()
+            return! f ()
         }
 
 let private preludeSource = """
@@ -75,11 +80,7 @@ let private preludeSource = """
 
     const wrapHostFunction = (func) => (...args) => {
         const ret = func(...args);
-        if (ret instanceof Promise) {
-            return ret.then(unwrapHostResult);
-        } else {
-            return unwrapHostResult(ret);
-        }
+        return unwrapHostResult(ret);
     };
 
     const internal = {};
@@ -91,7 +92,7 @@ let private preludeSource = """
     }
 
     const findInnerByKey = (object, key) => {
-        for (value of Object.values(object)) {
+        for (const value of Object.values(object)) {
             if (typeof value === 'object' && value) {
                 const currValue = object[key];
                 if (currValue !== undefined) {
@@ -339,27 +340,21 @@ type APIProxy (engine : JSEngine) as this =
     member inline private this.WrapApiCall<'Result, 'Error when 'Error :> IErrorDetails> ([<InlineIfLambda>] wrap : APIHandle -> (unit -> Task<'Result>) -> Task<Result<'Result, 'Error>>) ([<InlineIfLambda>] f : APIHandle -> Task<'Result>) : Task<'Result> =
         task {
             let handle = this.GetHandle ()
-            do! handle.Lock.WaitAsync()
             let! ret =
                 task {
+                    let! firstLock = handle.Lock()
+                    let mutable lock = firstLock
                     try
                         return! wrap handle <| fun () ->
-                            task {
-                                handle.Lock.Release()
-                                let! ret =
-                                    task {
-                                        try
-                                            return! f handle
-                                        with
-                                        | e ->
-                                            do! handle.Lock.WaitAsync()
-                                            return reraise' e
-                                    }
-                                do! handle.Lock.WaitAsync()
-                                return ret
-                            }
+                            lock.Dispose()
+                            let inline lockBack () =
+                                unitTask {
+                                    let! newLock = handle.UncancellableLock()
+                                    lock <- newLock
+                                }
+                            Task.deferAsync lockBack (fun () -> f handle)
                     finally
-                        handle.Lock.Release()
+                        lock.Dispose()
                 }
             match ret with
             | Ok r -> return r
@@ -367,20 +362,19 @@ type APIProxy (engine : JSEngine) as this =
         }
 
     member inline private this.RunVoidApiCall ([<InlineIfLambda>] f : APIHandle -> Task) : Task =
-        let handle = this.GetHandle ()
-        let task =
-            Task.lock handle.Lock <| fun () ->
-                handle.StackLock <| fun () ->
-                    task {
-                        do! f handle
-                        return ()
-                    }
-        task :> Task
+        unitTask {
+            let handle = this.GetHandle ()
+            do! handle.StackLock <| fun () ->
+                task {
+                    do! f handle
+                    return ()
+                }
+        }
 
     member inline private this.RunResultApiCall<'a, 'e when 'e :> IErrorDetails> ([<InlineIfLambda>] f : APIHandle -> Task<Result<'a, 'e>>) : Task<obj> =
         task {
             let handle = this.GetHandle ()
-            let! res = Task.lock handle.Lock <| fun () -> handle.StackLock <| fun () -> f handle
+            let! res = handle.StackLock <| fun () -> f handle
             match res with
             | Ok r -> return engine.Json.Serialize(r)
             | Error e -> return this.ThrowError e
@@ -389,8 +383,8 @@ type APIProxy (engine : JSEngine) as this =
     member inline private this.RunVoidResultApiCall<'e when 'e :> IErrorDetails> ([<InlineIfLambda>] f : APIHandle -> Task<Result<unit, 'e>>) : Task =
         unitTask {
             let handle = this.GetHandle ()
-            let! ret = Task.lock handle.Lock <| fun () -> handle.StackLock <| fun () -> f handle
-            match ret with
+            let! res = handle.StackLock <| fun () -> f handle
+            match res with
             | Ok r -> ()
             | Error e -> this.ThrowError e
         }
@@ -441,7 +435,7 @@ type APIProxy (engine : JSEngine) as this =
     [<ScriptUsage(ScriptAccess.Full)>]
     member this.DeferConstraints (f : IJavaScriptObject) =
         engine.WrapAsyncHostFunction <| fun () ->
-            this.WrapApiCall (fun handle -> handle.API.Entities.DeferConstraints) <|
+            this.WrapApiCall (fun handle -> handle.API.Entities.DeferConstraints) <| 
                 fun handle -> engine.RunAsyncJSFunction(f, [||]) 
 
     [<ScriptUsage(ScriptAccess.Full)>]

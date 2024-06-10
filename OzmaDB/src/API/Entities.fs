@@ -230,7 +230,7 @@ type EntitiesAPI (api : IOzmaDBAPI) =
         runAfterTrigger (fun script -> script.RunDeleteTriggerAfter entityRef ctx.CancellationToken) entityRef trigger
 
     member this.GetEntityInfo (req : GetEntityInfoRequest) : Task<Result<SerializedEntity, EntityErrorInfo>> =
-        wrapAPIResult rctx logger "getEntityInfo" req <| fun () -> task {
+        wrapAPIResult rctx "getEntityInfo" req <| fun () -> task {
             match ctx.Layout.FindEntity req.Entity with
             | Some entity ->
                 try
@@ -246,7 +246,7 @@ type EntitiesAPI (api : IOzmaDBAPI) =
         }
 
     member this.InsertEntries (req : InsertEntriesRequest) : Task<Result<InsertEntriesResponse, TransactionErrorInfo>> =
-        wrapAPIError rctx logger "insertEntries" req <| fun () -> task {
+        wrapAPIError rctx "insertEntries" req <| fun () -> task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -342,7 +342,7 @@ type EntitiesAPI (api : IOzmaDBAPI) =
         }
 
     member this.UpdateEntry (req : UpdateEntryRequest) : Task<Result<UpdateEntryResponse, EntityErrorInfo>> =
-        wrapAPIError rctx logger "updateEntry" req <| fun () -> task {
+        wrapAPIError rctx "updateEntry" req <| fun () -> task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -408,7 +408,7 @@ type EntitiesAPI (api : IOzmaDBAPI) =
         }
 
     member this.DeleteEntry (req : DeleteEntryRequest) : Task<Result<unit, EntityErrorInfo>> =
-        wrapAPIError rctx logger "deleteEntry" req <| fun () -> task {
+        wrapAPIError rctx "deleteEntry" req <| fun () -> task {
             match ctx.Layout.FindEntity req.Entity with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -456,7 +456,7 @@ type EntitiesAPI (api : IOzmaDBAPI) =
         }
 
     member this.GetRelatedEntries (req : GetRelatedEntriesRequest) : Task<Result<ReferencesTree, EntityErrorInfo>> =
-        wrapAPIResult rctx logger "getRelatedEntries" req <| fun () -> task {
+        wrapAPIResult rctx "getRelatedEntries" req <| fun () -> task {
             match ctx.Layout.FindEntity(req.Entity) with
             | None ->
                 let err = sprintf "Entity %O not found" req.Entity
@@ -505,7 +505,7 @@ type EntitiesAPI (api : IOzmaDBAPI) =
         }
 
     member this.RunCommand (req : CommandRequest) : Task<Result<unit, EntityErrorInfo>> =
-        wrapUnitAPIResult rctx logger "runCommand" req <| fun () -> task {
+        wrapUnitAPIResult rctx "runCommand" req <| fun () -> task {
             try
                 let! cmd = ctx.GetAnonymousCommand rctx.IsPrivileged req.Command
                 let comments = commandComments req.Command rctx.User.Effective.Type req.Args
@@ -539,7 +539,7 @@ type EntitiesAPI (api : IOzmaDBAPI) =
 
     member this.RunTransaction (req : TransactionRequest) : Task<Result<TransactionResponse, TransactionErrorInfo>> =
         task {
-            logAPIRequest rctx logger "runTransaction" req
+            logAPIRequest rctx "runTransaction" req
 
             let inline runPendingInsert (pending : PendingMassInsert) =
                 task {
@@ -608,7 +608,7 @@ type EntitiesAPI (api : IOzmaDBAPI) =
 
     member this.DeferConstraints (func : unit -> Task<'a>) : Task<Result<'a, EntityErrorInfo>> =
         task {
-            logAPIRequest rctx logger "deferConstraints" emptyRequest
+            logAPIRequest rctx "deferConstraints" emptyRequest
             try
                 let! ret = ctx.Transaction.DeferConstraints ctx.CancellationToken func
                 return Ok ret

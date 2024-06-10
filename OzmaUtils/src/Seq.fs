@@ -5,7 +5,7 @@ open System
 open System.Linq
 open System.Collections.Generic
 open System.Threading.Tasks
-open FSharp.Control.Tasks.NonAffine
+open FSharp.Control.Tasks.Affine
 
 let inline mapMaybe (f : 'a -> 'b option) (s : seq<'a>) : seq<'b> =
     seq {

@@ -287,6 +287,7 @@ type RequestContext private (ctx : IContext, initialUserInfo : RequestUserInfo, 
         member this.GlobalArguments = globalArguments
         member this.Source = source
         member this.Quota = opts.Quota
+        member this.Logger = logger
 
         member this.WriteEvent addDetails = this.WriteEvent addDetails
         member this.WriteEventSync addDetails = this.WriteEventSync addDetails

@@ -69,30 +69,30 @@ let private waitRemoteJob<'a> (remote : RemoteJobRef) (delay : TimeSpan) (cancel
 
         let subscr = remote.Settings.Multiplexer.GetSubscriber()
         let! queue = subscr.SubscribeAsync(jobChannel)
-        try
-            let conn = remote.Settings.Multiplexer.GetDatabase()
-            let! rawResult = conn.StringGetSetExpiryAsync(jobKey, delay + remote.Settings.IdleTimeout)
-            if rawResult.IsNull then
-                return RJNotFound
-            else if not rawResult.IsNullOrEmpty then
-                return! parseRemoteResult remote conn rawResult cancellationToken
-            else
-                use newSource = new CancellationTokenSource()
-                newSource.CancelAfter(delay)
-                let cancelToken = cancellationToken.Register(fun () -> newSource.Cancel())
-                try
+        return! Task.deferAsync (fun () -> queue.UnsubscribeAsync ()) <| fun () ->
+            task {
+                let conn = remote.Settings.Multiplexer.GetDatabase()
+                let! rawResult = conn.StringGetSetExpiryAsync(jobKey, delay + remote.Settings.IdleTimeout)
+                if rawResult.IsNull then
+                    return RJNotFound
+                else if not rawResult.IsNullOrEmpty then
+                    return! parseRemoteResult remote conn rawResult cancellationToken
+                else
+                    use newSource = new CancellationTokenSource()
+                    newSource.CancelAfter(delay)
+                    let cancelToken = cancellationToken.Register(fun () -> newSource.Cancel())
                     try
-                        let! gotResult = queue.ReadAsync(newSource.Token)
-                        let! rawResult = conn.StringGetAsync(jobKey)
-                        return! parseRemoteResult remote conn rawResult cancellationToken
-                    with
-                    | :? OperationCanceledException ->
-                        cancellationToken.ThrowIfCancellationRequested ()
-                        return RJPending
-                finally
-                    ignore <| cancelToken.Unregister()
-        finally
-            ignore <| queue.UnsubscribeAsync ()
+                        try
+                            let! gotResult = queue.ReadAsync(newSource.Token)
+                            let! rawResult = conn.StringGetAsync(jobKey)
+                            return! parseRemoteResult remote conn rawResult cancellationToken
+                        with
+                        | :? OperationCanceledException ->
+                            cancellationToken.ThrowIfCancellationRequested ()
+                            return RJPending
+                    finally
+                        ignore <| cancelToken.Unregister()
+            }
     }
 
 type JobDataWriter =
