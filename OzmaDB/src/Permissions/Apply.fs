@@ -116,11 +116,11 @@ let private inheritedFlatAllowedDerivedEntity : FlatAllowedDerivedEntity =
     }
 
 let inline private getAccessFilter
-        (getParent : ResolvedEntityRef -> ResolvedOptimizedFieldExpr)
-        (accessor : ResolvedEntityRef -> FlatAllowedDerivedEntity -> ResolvedOptimizedFieldExpr)
-        (layout : Layout) (flatAllowedEntity : FlatAllowedRoleEntity)
-        (entityRef : ResolvedEntityRef)
-        : ResolvedOptimizedFieldExpr =
+        ([<InlineIfLambda>] getParent : ResolvedEntityRef -> ResolvedOptimizedFieldExpr)
+        ([<InlineIfLambda>] accessor : ResolvedEntityRef -> FlatAllowedDerivedEntity -> ResolvedOptimizedFieldExpr)
+        (layout : Layout)
+        (flatAllowedEntity : FlatAllowedRoleEntity)
+        (entityRef : ResolvedEntityRef) =
     let entity = layout.FindEntity entityRef |> Option.get
     let parentFilter =
         match entity.Parent with
