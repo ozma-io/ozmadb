@@ -22,7 +22,7 @@ jobs:
           dotnet build -c Release --no-restore
       - name: Publish
         run: |
-          dotnet publish -o ozmadb -c Release --no-restore -r linux-x64 --self-contained true /p:UseAppHost=true OzmaDB/OzmaDB.fsproj
+          dotnet publish -o ozmadb -c Release --no-restore -r linux-x64
           tar -c ozmadb | xz > ozmadb.tar.xz
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
