@@ -1,11 +1,7 @@
-FROM mcr.microsoft.com/dotnet/sdk:6.0-bullseye-slim
+FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim
 
 # Install Mono (for FsLexYacc build steps).
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
   && apt-get -y install mono-runtime libmono-system-core4.0-cil \
-  && rm -rf /var/lib/apt/lists/*
-# Install C++ compiler for NetJs.
-RUN apt-get update \
-  && apt-get -y install build-essential gcc-9 \
   && rm -rf /var/lib/apt/lists/*
