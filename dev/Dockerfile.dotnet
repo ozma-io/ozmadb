@@ -1,7 +1,0 @@
-FROM mcr.microsoft.com/dotnet/sdk:8.0-bookworm-slim
-
-# Install Mono (for FsLexYacc build steps).
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
-  && apt-get -y install mono-runtime libmono-system-core4.0-cil \
-  && rm -rf /var/lib/apt/lists/*
