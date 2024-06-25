@@ -13,20 +13,16 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Restore NetJs Dependencies
+      - name: Restore
         run: |
           dotnet restore --locked-mode -r linux-x64
-
-      - name: Build
-        run: |
-          dotnet build -c Release --no-restore
       - name: Publish
         run: |
-          dotnet publish -o ozmadb -c Release --no-restore -r linux-x64
+          dotnet publish -o ozmadb -c Release -r linux-x64
           tar -c ozmadb | xz > ozmadb.tar.xz
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: packages
+          name: ozmadb
           path: |
-            ozmadb.tar.xz
+            ozmadb/
