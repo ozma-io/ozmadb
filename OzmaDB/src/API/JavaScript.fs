@@ -22,57 +22,56 @@ open OzmaDB.JavaScript.Runtime
 
 [<SerializeAsObject("error")>]
 type APICallErrorInfo =
-    | [<CaseKey("call")>] ACECall of Details : string
-    with
-        [<DataMember>]
-        member this.Message =
-            match this with
-            | ACECall msg -> msg
+    | [<CaseKey("call")>] ACECall of Details: string
 
-        member this.ShouldLog = false
+    [<DataMember>]
+    member this.Message =
+        match this with
+        | ACECall msg -> msg
 
-        static member private LookupKey = prepareLookupCaseKey<APICallErrorInfo>
-        member this.Error =
-            APICallErrorInfo.LookupKey this |> Option.get
+    member this.ShouldLog = false
 
-        interface ILoggableResponse with
-            member this.ShouldLog = this.ShouldLog
-            member this.Details = Map.empty
+    static member private LookupKey = prepareLookupCaseKey<APICallErrorInfo>
+    member this.Error = APICallErrorInfo.LookupKey this |> Option.get
 
-        interface IErrorDetails with
-            member this.Message = this.Message
-            member this.LogMessage = this.Message
-            member this.HTTPResponseCode = 500
-            member this.Error = this.Error
+    interface ILoggableResponse with
+        member this.ShouldLog = this.ShouldLog
+        member this.Details = Map.empty
+
+    interface IErrorDetails with
+        member this.Message = this.Message
+        member this.LogMessage = this.Message
+        member this.HTTPResponseCode = 500
+        member this.Error = this.Error
 
 // We don't declare these private because JSON serialization then breaks.
 // See https://stackoverflow.com/questions/54169707/f-internal-visibility-changes-record-constructor-behavior
-type WriteEventRequest =
-    { Details : JToken
-    }
+type WriteEventRequest = { Details: JToken }
 
-type private APIHandle (api : IOzmaDBAPI) =
+type private APIHandle(api: IOzmaDBAPI) =
     let logger = api.Request.Context.LoggerFactory.CreateLogger<APIHandle>()
     let mutable lock = AsyncLocal<AsyncLock>()
-    do
-        lock.Value <- AsyncLock()
+    do lock.Value <- AsyncLock()
 
     member this.API = api
     member this.Logger = logger
 
-    member this.Lock () = lock.Value.LockAsync(api.Request.Context.CancellationToken)
-    member this.UncancellableLock () = lock.Value.LockAsync()
+    member this.Lock() =
+        lock.Value.LockAsync(api.Request.Context.CancellationToken)
+
+    member this.UncancellableLock() = lock.Value.LockAsync()
 
 
     // We need to support stacking the locks because API functions may call back into JavaScript.
-    member inline this.StackLock (f : unit -> Task<'a>) : Task<'a> =
+    member inline this.StackLock(f: unit -> Task<'a>) : Task<'a> =
         task {
             use! guard = this.Lock()
             lock.Value <- AsyncLock()
             return! f ()
         }
 
-let private preludeSource = """
+let private preludeSource =
+    """
     const apiProxy = globalThis.apiProxy;
     delete globalThis.apiProxy;
     const unwrapHostResult = globalThis.unwrapHostResult;
@@ -293,188 +292,247 @@ let private preludeSource = """
 """
 
 let private preludeDoc =
-    let info = DocumentInfo("fundb_prelude.js", Category=ModuleCategory.Standard)
+    let info = DocumentInfo("fundb_prelude.js", Category = ModuleCategory.Standard)
     RuntimeLocal(fun runtime -> runtime.Runtime.Compile(info, preludeSource))
 
 [<DefaultScriptUsage(ScriptAccess.None)>]
-type APIProxy (engine : JSEngine) as this =
-    let mutable currentHandle = None : APIHandle option
+type APIProxy(engine: JSEngine) as this =
+    let mutable currentHandle = None: APIHandle option
 
     do
         engine.Engine.AddHostObject("apiProxy", this)
         ignore <| engine.Engine.Evaluate(preludeDoc.GetValue(engine.Runtime))
+
     let errorConstructor = engine.Engine.Global.["OzmaDBError"] :?> IJavaScriptObject
 
-    member inline private this.ThrowErrorWithInner (e : #IErrorDetails) (innerException : exn) : 'b =
+    member inline private this.ThrowErrorWithInner (e: #IErrorDetails) (innerException: exn) : 'b =
         let body = engine.Json.Serialize(e)
         let exc = errorConstructor.Invoke(true, body) :?> IJavaScriptObject
         raise <| JSException(e.Message, exc, innerException)
 
-    member inline private this.ThrowError (e : #IErrorDetails) : 'b =
-        this.ThrowErrorWithInner e null
+    member inline private this.ThrowError(e: #IErrorDetails) : 'b = this.ThrowErrorWithInner e null
 
-    member private this.FormatErrorWithInner (innerException : exn) format =
+    member private this.FormatErrorWithInner (innerException: exn) format =
         let thenRaise str =
             this.ThrowErrorWithInner (ACECall str) innerException
+
         ksprintf thenRaise format
 
-    member private this.FormatError format =
-        this.FormatErrorWithInner null format
+    member private this.FormatError format = this.FormatErrorWithInner null format
 
-    member private this.Deserialize (v : obj) : 'a =
+    member private this.Deserialize(v: obj) : 'a =
         let ret =
             try
                 V8JsonReader.Deserialize<'a>(v)
-            with
-            | :? JsonException as e ->
+            with :? JsonException as e ->
                 this.FormatErrorWithInner e "Failed to parse value: %s" e.Message
+
         if isRefNull ret then
             this.FormatError "Value must not be null"
+
         ret
 
-    member private this.GetHandle () =
+    member private this.GetHandle() =
         match currentHandle with
         | Some handle -> handle
         | None -> this.FormatError "This API call cannot be used in this context"
 
-    member inline private this.WrapApiCall<'Result, 'Error when 'Error :> IErrorDetails> ([<InlineIfLambda>] wrap : APIHandle -> (unit -> Task<'Result>) -> Task<Result<'Result, 'Error>>) ([<InlineIfLambda>] f : APIHandle -> Task<'Result>) : Task<'Result> =
+    member inline private this.WrapApiCall<'Result, 'Error when 'Error :> IErrorDetails>
+        ([<InlineIfLambda>] wrap: APIHandle -> (unit -> Task<'Result>) -> Task<Result<'Result, 'Error>>)
+        ([<InlineIfLambda>] f: APIHandle -> Task<'Result>)
+        : Task<'Result> =
         task {
-            let handle = this.GetHandle ()
+            let handle = this.GetHandle()
+
             let! ret =
                 task {
                     let! firstLock = handle.Lock()
                     let mutable lock = firstLock
+
                     try
-                        return! wrap handle <| fun () ->
-                            lock.Dispose()
-                            let inline lockBack () =
-                                unitTask {
-                                    let! newLock = handle.UncancellableLock()
-                                    lock <- newLock
-                                }
-                            Task.deferAsync lockBack (fun () -> f handle)
+                        return!
+                            wrap handle
+                            <| fun () ->
+                                lock.Dispose()
+
+                                let inline lockBack () =
+                                    unitTask {
+                                        let! newLock = handle.UncancellableLock()
+                                        lock <- newLock
+                                    }
+
+                                Task.deferAsync lockBack (fun () -> f handle)
                     finally
                         lock.Dispose()
                 }
+
             match ret with
             | Ok r -> return r
             | Error e -> return this.ThrowError e
         }
 
-    member inline private this.RunVoidApiCall ([<InlineIfLambda>] f : APIHandle -> Task) : Task =
+    member inline private this.RunVoidApiCall([<InlineIfLambda>] f: APIHandle -> Task) : Task =
         unitTask {
-            let handle = this.GetHandle ()
-            do! handle.StackLock <| fun () ->
-                task {
-                    do! f handle
-                    return ()
-                }
+            let handle = this.GetHandle()
+
+            do!
+                handle.StackLock
+                <| fun () ->
+                    task {
+                        do! f handle
+                        return ()
+                    }
         }
 
-    member inline private this.RunResultApiCall<'a, 'e when 'e :> IErrorDetails> ([<InlineIfLambda>] f : APIHandle -> Task<Result<'a, 'e>>) : Task<obj> =
+    member inline private this.RunResultApiCall<'a, 'e when 'e :> IErrorDetails>
+        ([<InlineIfLambda>] f: APIHandle -> Task<Result<'a, 'e>>)
+        : Task<obj> =
         task {
-            let handle = this.GetHandle ()
+            let handle = this.GetHandle()
             let! res = handle.StackLock <| fun () -> f handle
+
             match res with
             | Ok r -> return engine.Json.Serialize(r)
             | Error e -> return this.ThrowError e
         }
 
-    member inline private this.RunVoidResultApiCall<'e when 'e :> IErrorDetails> ([<InlineIfLambda>] f : APIHandle -> Task<Result<unit, 'e>>) : Task =
+    member inline private this.RunVoidResultApiCall<'e when 'e :> IErrorDetails>
+        ([<InlineIfLambda>] f: APIHandle -> Task<Result<unit, 'e>>)
+        : Task =
         unitTask {
-            let handle = this.GetHandle ()
+            let handle = this.GetHandle()
             let! res = handle.StackLock <| fun () -> f handle
+
             match res with
             | Ok r -> ()
             | Error e -> this.ThrowError e
         }
 
-    member inline private this.SimpleApiCall (arg : obj) ([<InlineIfLambda>] f : APIHandle -> 'Request -> Task<Result<'Response, 'Error>>) =
-        engine.WrapAsyncHostFunction <| fun () ->
-            let req = this.Deserialize arg : 'Request
+    member inline private this.SimpleApiCall
+        (arg: obj)
+        ([<InlineIfLambda>] f: APIHandle -> 'Request -> Task<Result<'Response, 'Error>>)
+        =
+        engine.WrapAsyncHostFunction
+        <| fun () ->
+            let req = this.Deserialize arg: 'Request
             this.RunResultApiCall <| fun handle -> f handle req
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.FormatOzmaQLName (name : string) =
+    member this.FormatOzmaQLName(name: string) =
         engine.WrapHostFunction <| fun () -> renderOzmaQLName name
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.FormatOzmaQLValue (arg : obj) =
-        engine.WrapHostFunction <| fun () ->
+    member this.FormatOzmaQLValue(arg: obj) =
+        engine.WrapHostFunction
+        <| fun () ->
             use reader = new V8JsonReader(arg)
+
             let source =
                 try
                     JToken.Load(reader)
-                with
-                | :? JsonReaderException as e -> this.FormatError "Failed to parse value: %s" e.Message
+                with :? JsonReaderException as e ->
+                    this.FormatError "Failed to parse value: %s" e.Message
+
             try
                 renderOzmaQLJson source
-            with
-            | Failure msg -> this.FormatError "%s" msg
+            with Failure msg ->
+                this.FormatError "%s" msg
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.GetUserView arg = this.SimpleApiCall arg (fun handle -> handle.API.UserViews.GetUserView)
-    [<ScriptUsage(ScriptAccess.Full)>]
-    member this.GetUserViewInfo arg = this.SimpleApiCall arg (fun handle -> handle.API.UserViews.GetUserViewInfo)
+    member this.GetUserView arg =
+        this.SimpleApiCall arg (fun handle -> handle.API.UserViews.GetUserView)
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.GetEntityInfo arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.GetEntityInfo)
-    [<ScriptUsage(ScriptAccess.Full)>]
-    member this.InsertEntries arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.InsertEntries)
-    [<ScriptUsage(ScriptAccess.Full)>]
-    member this.UpdateEntry arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.UpdateEntry)
-    [<ScriptUsage(ScriptAccess.Full)>]
-    member this.GeleteEntry arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.DeleteEntry)
-    [<ScriptUsage(ScriptAccess.Full)>]
-    member this.GetRelatedEntries arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.GetRelatedEntries)
-    [<ScriptUsage(ScriptAccess.Full)>]
-    member this.RecursiveDeleteEntry arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.RecursiveDeleteEntry)
-    [<ScriptUsage(ScriptAccess.Full)>]
-    member this.RunCommand arg = this.SimpleApiCall arg (fun handle -> handle.API.Entities.RunCommand)
+    member this.GetUserViewInfo arg =
+        this.SimpleApiCall arg (fun handle -> handle.API.UserViews.GetUserViewInfo)
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.DeferConstraints (f : IJavaScriptObject) =
-        engine.WrapAsyncHostFunction <| fun () ->
-            this.WrapApiCall (fun handle -> handle.API.Entities.DeferConstraints) <| 
-                fun handle -> engine.RunAsyncJSFunction(f, [||]) 
+    member this.GetEntityInfo arg =
+        this.SimpleApiCall arg (fun handle -> handle.API.Entities.GetEntityInfo)
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.PretendRole (req : obj) (f : IJavaScriptObject) =
-        engine.WrapAsyncHostFunction <| fun () ->
-            let req = this.Deserialize req : PretendRoleRequest
-            this.WrapApiCall  (fun handle -> handle.API.Request.PretendRole req) <|
-                fun handle -> engine.RunAsyncJSFunction(f, [||])
+    member this.InsertEntries arg =
+        this.SimpleApiCall arg (fun handle -> handle.API.Entities.InsertEntries)
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.GetDomainValues arg = this.SimpleApiCall arg (fun handle -> handle.API.Domains.GetDomainValues)
+    member this.UpdateEntry arg =
+        this.SimpleApiCall arg (fun handle -> handle.API.Entities.UpdateEntry)
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.WriteEvent (arg : obj) =
-        engine.WrapHostFunction <| fun () ->
-            let req = this.Deserialize arg : WriteEventRequest
-            let handle = this.GetHandle ()
-            handle.Logger.LogInformation("Source {source} wrote event from JavaScript: {details}", handle.API.Request.Source, req.Details.ToString())
-            handle.API.Request.WriteEvent (fun event ->
-                event.Type <- "writeEvent"
-                event.Request <- JsonConvert.SerializeObject req
+    member this.GeleteEntry arg =
+        this.SimpleApiCall arg (fun handle -> handle.API.Entities.DeleteEntry)
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.GetRelatedEntries arg =
+        this.SimpleApiCall arg (fun handle -> handle.API.Entities.GetRelatedEntries)
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.RecursiveDeleteEntry arg =
+        this.SimpleApiCall arg (fun handle -> handle.API.Entities.RecursiveDeleteEntry)
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.RunCommand arg =
+        this.SimpleApiCall arg (fun handle -> handle.API.Entities.RunCommand)
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.DeferConstraints(f: IJavaScriptObject) =
+        engine.WrapAsyncHostFunction
+        <| fun () ->
+            this.WrapApiCall(fun handle -> handle.API.Entities.DeferConstraints)
+            <| fun handle -> engine.RunAsyncJSFunction(f, [||])
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.PretendRole (req: obj) (f: IJavaScriptObject) =
+        engine.WrapAsyncHostFunction
+        <| fun () ->
+            let req = this.Deserialize req: PretendRoleRequest
+
+            this.WrapApiCall(fun handle -> handle.API.Request.PretendRole req)
+            <| fun handle -> engine.RunAsyncJSFunction(f, [||])
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.GetDomainValues arg =
+        this.SimpleApiCall arg (fun handle -> handle.API.Domains.GetDomainValues)
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.WriteEvent(arg: obj) =
+        engine.WrapHostFunction
+        <| fun () ->
+            let req = this.Deserialize arg: WriteEventRequest
+            let handle = this.GetHandle()
+
+            handle.Logger.LogInformation(
+                "Source {source} wrote event from JavaScript: {details}",
+                handle.API.Request.Source,
+                req.Details.ToString()
             )
+
+            handle.API.Request.WriteEvent(fun event ->
+                event.Type <- "writeEvent"
+                event.Request <- JsonConvert.SerializeObject req)
+
             Undefined.Value
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.WriteEventSync (arg : obj) =
-        let req = this.Deserialize arg : WriteEventRequest
-        this.RunVoidApiCall <| fun handle ->
-            handle.Logger.LogInformation("Source {source} wrote sync event from JavaScript: {details}", handle.API.Request.Source, req.Details.ToString())
-            handle.API.Request.WriteEventSync (fun event ->
-                event.Type <- "writeEvent"
-                event.Request <- JsonConvert.SerializeObject req
+    member this.WriteEventSync(arg: obj) =
+        let req = this.Deserialize arg: WriteEventRequest
+
+        this.RunVoidApiCall
+        <| fun handle ->
+            handle.Logger.LogInformation(
+                "Source {source} wrote sync event from JavaScript: {details}",
+                handle.API.Request.Source,
+                req.Details.ToString()
             )
 
-    member this.SetAPI (api : IOzmaDBAPI) =
+            handle.API.Request.WriteEventSync(fun event ->
+                event.Type <- "writeEvent"
+                event.Request <- JsonConvert.SerializeObject req)
+
+    member this.SetAPI(api: IOzmaDBAPI) =
         assert (Option.isNone currentHandle)
         currentHandle <- Some <| APIHandle(api)
 
-    member this.ResetAPI api =
-        currentHandle <- None
+    member this.ResetAPI api = currentHandle <- None
 
     member this.Engine = engine

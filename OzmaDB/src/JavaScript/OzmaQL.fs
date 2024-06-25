@@ -7,17 +7,20 @@ open OzmaDB.OzmaUtils
 open OzmaDB.JavaScript.AST
 open OzmaDB.OzmaQL.AST
 
-type JSCompileException (message : string) =
+type JSCompileException(message: string) =
     inherit Exception(message)
 
 // FIXME: may not take offset into consideration
-let jsDateTime (dt : Instant) : JSExpr = JSNew (JSVar "Date", [| dt.ToUnixTimeMilliseconds() |> double |> JSNumber |> JSValue |])
+let jsDateTime (dt: Instant) : JSExpr =
+    JSNew(JSVar "Date", [| dt.ToUnixTimeMilliseconds() |> double |> JSNumber |> JSValue |])
 
-let jsDate (dt : LocalDate) : JSExpr = JSNew (JSVar "Date", [| dt.Year; dt.Month; dt.Day |] |> Array.map (double >> JSNumber >> JSValue))
+let jsDate (dt: LocalDate) : JSExpr =
+    JSNew(JSVar "Date", [| dt.Year; dt.Month; dt.Day |] |> Array.map (double >> JSNumber >> JSValue))
 
-let jsFieldValue : FieldValue -> JSExpr = function
-    | FInt i -> JSValue <| JSNumber (double i)
-    | FDecimal d -> JSValue <| JSNumber (double d)
+let jsFieldValue: FieldValue -> JSExpr =
+    function
+    | FInt i -> JSValue <| JSNumber(double i)
+    | FDecimal d -> JSValue <| JSNumber(double d)
     | FString s -> JSValue <| JSString s
     | FBool b -> JSValue <| JSBool b
     | FDateTime dt -> failwith "Not implemented"
@@ -39,35 +42,45 @@ let jsFieldValue : FieldValue -> JSExpr = function
     | FNull -> JSValue JSNull
 
 // Expects local variable `context`.
-let jsLocalFieldExpr : LocalFieldExpr -> JSExpr =
-    let rec go = function
+let jsLocalFieldExpr: LocalFieldExpr -> JSExpr =
+    let rec go =
+        function
         | FEValue v -> jsFieldValue v
         //| FERef col -> JSCall (JSObjectAccess (JSVar "context", "getColumn"), [| JSValue (JSString (col.ToString())) |])
         //| FEArgumentRef p -> raisef JSCompileException "Unexpected placeholder in local expression: %O" p
         | FENot e -> JSNot <| go e
-        | FEAnd (a, b) -> JSAnd (go a, go b)
-        | FEOr (a, b) -> JSOr (go a, go b)
-        | FEBinaryOp (a, op, b) ->
+        | FEAnd(a, b) -> JSAnd(go a, go b)
+        | FEOr(a, b) -> JSOr(go a, go b)
+        | FEBinaryOp(a, op, b) ->
             match op with
-            | BOConcat -> JSPlus (go a, go b)
-            | BOEq -> JSCall (JSObjectAccess (JSVar "context", "isEqual"), [| go a; go b |])
-            | BONotEq -> JSNot <| JSCall (JSObjectAccess (JSVar "context", "isEqual"), [| go a; go b |])
-            | BOLike -> JSCall (JSObjectAccess (JSVar "context", "isLike"), [| go a; go b |])
-            | BONotLike -> JSNot <| JSCall (JSObjectAccess (JSVar "context", "isLike"), [| go a; go b |])
-            | BOLess -> JSCall (JSObjectAccess (JSVar "context", "isLess"), [| go a; go b |])
-            | BOLessEq -> JSCall (JSObjectAccess (JSVar "context", "isLessEq"), [| go a; go b |])
-            | BOGreater -> JSCall (JSObjectAccess (JSVar "context", "isGreater"), [| go a; go b |])
-            | BOGreaterEq -> JSCall (JSObjectAccess (JSVar "context", "isGreaterEq"), [| go a; go b |])
+            | BOConcat -> JSPlus(go a, go b)
+            | BOEq -> JSCall(JSObjectAccess(JSVar "context", "isEqual"), [| go a; go b |])
+            | BONotEq -> JSNot <| JSCall(JSObjectAccess(JSVar "context", "isEqual"), [| go a; go b |])
+            | BOLike -> JSCall(JSObjectAccess(JSVar "context", "isLike"), [| go a; go b |])
+            | BONotLike -> JSNot <| JSCall(JSObjectAccess(JSVar "context", "isLike"), [| go a; go b |])
+            | BOLess -> JSCall(JSObjectAccess(JSVar "context", "isLess"), [| go a; go b |])
+            | BOLessEq -> JSCall(JSObjectAccess(JSVar "context", "isLessEq"), [| go a; go b |])
+            | BOGreater -> JSCall(JSObjectAccess(JSVar "context", "isGreater"), [| go a; go b |])
+            | BOGreaterEq -> JSCall(JSObjectAccess(JSVar "context", "isGreaterEq"), [| go a; go b |])
             | _ -> failwith "Not implemented"
-        | FEIn (e, items) -> JSCall (JSObjectAccess (JSVar "context", "isIn"), [| go e; JSArray <| Array.map go items |])
-        | FENotIn (e, items) -> JSNot <| JSCall (JSObjectAccess (JSVar "context", "isIn"), [| go e; JSArray <| Array.map go items |])
-        | FECast (e, typ) ->
+        | FEIn(e, items) -> JSCall(JSObjectAccess(JSVar "context", "isIn"), [| go e; JSArray <| Array.map go items |])
+        | FENotIn(e, items) ->
+            JSNot
+            <| JSCall(JSObjectAccess(JSVar "context", "isIn"), [| go e; JSArray <| Array.map go items |])
+        | FECast(e, typ) ->
             let (isArray, scalarName) =
                 match typ with
                 | FTScalar st -> (false, st)
                 | FTArray st -> (true, st)
-            JSCall (JSObjectAccess (JSVar "context", "cast"), [| go e; JSValue (JSBool isArray); JSValue (JSString (scalarName.ToOzmaQLString())) |])
-        | FEIsNull e -> JSStrictEq (go e, JSValue JSNull)
-        | FEIsNotNull e -> JSStrictNotEq (go e, JSValue JSNull)
+
+            JSCall(
+                JSObjectAccess(JSVar "context", "cast"),
+                [| go e
+                   JSValue(JSBool isArray)
+                   JSValue(JSString(scalarName.ToOzmaQLString())) |]
+            )
+        | FEIsNull e -> JSStrictEq(go e, JSValue JSNull)
+        | FEIsNotNull e -> JSStrictNotEq(go e, JSValue JSNull)
         | _ -> failwith "Not implemented"
+
     go

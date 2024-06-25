@@ -14,12 +14,12 @@ open OzmaDB.Triggers.Source
 open OzmaDB.Triggers.Types
 open OzmaDB.Triggers.Run
 
-type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) as this =
+type private TriggersUpdater(db: SystemContext, allSchemas: Schema seq) as this =
     inherit SystemUpdater(db)
 
     let allEntitiesMap = makeAllEntitiesMap allSchemas
 
-    let updateTriggersField (trigger : SourceTrigger) (existingTrigger : Trigger) : unit =
+    let updateTriggersField (trigger: SourceTrigger) (existingTrigger: Trigger) : unit =
         existingTrigger.AllowBroken <- trigger.AllowBroken
         existingTrigger.Priority <- trigger.Priority
         existingTrigger.Time <- trigger.Time.ToString()
@@ -28,47 +28,64 @@ type private TriggersUpdater (db : SystemContext, allSchemas : Schema seq) as th
         existingTrigger.OnDelete <- trigger.OnDelete
         existingTrigger.Procedure <- trigger.Procedure
 
-    let updateTriggersDatabase (schema : SourceTriggersDatabase) (existingSchema : Schema) : unit =
+    let updateTriggersDatabase (schema: SourceTriggersDatabase) (existingSchema: Schema) : unit =
         let addOldTriggerKey (trigger: Trigger) =
-            (({ Schema = OzmaQLName trigger.TriggerEntity.Schema.Name; Name = OzmaQLName trigger.TriggerEntity.Name }, OzmaQLName trigger.Name), trigger)
+            (({ Schema = OzmaQLName trigger.TriggerEntity.Schema.Name
+                Name = OzmaQLName trigger.TriggerEntity.Name },
+              OzmaQLName trigger.Name),
+             trigger)
+
         let oldTriggersMap =
             existingSchema.Triggers |> Seq.map addOldTriggerKey |> Map.ofSeq
 
-        let addNewTriggerKey schemaName entityName (triggerName, trig : SourceTrigger) =
-            (({ Schema = schemaName; Name = entityName }, triggerName), trig)
-        let addNewTriggersEntityKey schemaName (entityName, entity : SourceTriggersEntity) =
+        let addNewTriggerKey schemaName entityName (triggerName, trig: SourceTrigger) =
+            (({ Schema = schemaName
+                Name = entityName },
+              triggerName),
+             trig)
+
+        let addNewTriggersEntityKey schemaName (entityName, entity: SourceTriggersEntity) =
             entity.Triggers |> Map.toSeq |> Seq.map (addNewTriggerKey schemaName entityName)
-        let addNewTriggersSchemaKey (schemaName, schema : SourceTriggersSchema) =
+
+        let addNewTriggersSchemaKey (schemaName, schema: SourceTriggersSchema) =
             schema.Entities |> Map.toSeq |> Seq.collect (addNewTriggersEntityKey schemaName)
-        let newTriggersMap = schema.Schemas |> Map.toSeq |> Seq.collect addNewTriggersSchemaKey |> Map.ofSeq
+
+        let newTriggersMap =
+            schema.Schemas |> Map.toSeq |> Seq.collect addNewTriggersSchemaKey |> Map.ofSeq
 
         let updateFunc _ = updateTriggersField
+
         let createFunc (entityRef, OzmaQLName triggerName) =
             let entity =
                 match Map.tryFind entityRef allEntitiesMap with
                 | Some id -> id
                 | None -> raisef SystemUpdaterException "Unknown entity %O for trigger %O" entityRef triggerName
-            Trigger (
-                TriggerEntity = entity,
-                Name = triggerName,
-                Schema = existingSchema
-            )
-        ignore <| this.UpdateDifference updateFunc createFunc newTriggersMap oldTriggersMap
 
-    let updateSchemas (schemas : Map<SchemaName, SourceTriggersDatabase>) (existingSchemas : Map<SchemaName, Schema>) =
+            Trigger(TriggerEntity = entity, Name = triggerName, Schema = existingSchema)
+
+        ignore
+        <| this.UpdateDifference updateFunc createFunc newTriggersMap oldTriggersMap
+
+    let updateSchemas (schemas: Map<SchemaName, SourceTriggersDatabase>) (existingSchemas: Map<SchemaName, Schema>) =
         let updateFunc name schema existingSchema =
             try
                 updateTriggersDatabase schema existingSchema
-            with
-            | :? SystemUpdaterException as e -> raisefWithInner SystemUpdaterException e "In schema %O" name
+            with :? SystemUpdaterException as e ->
+                raisefWithInner SystemUpdaterException e "In schema %O" name
+
         this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
-let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellationToken : CancellationToken) : Task<UpdateResult> =
-    genericSystemUpdate db cancellationToken <| fun () ->
+let updateTriggers
+    (db: SystemContext)
+    (triggers: SourceTriggers)
+    (cancellationToken: CancellationToken)
+    : Task<UpdateResult> =
+    genericSystemUpdate db cancellationToken
+    <| fun () ->
         task {
-            let currentSchemas = db.GetTriggersObjects ()
+            let currentSchemas = db.GetTriggersObjects()
 
             let! allSchemas = currentSchemas.AsTracking().ToListAsync(cancellationToken)
             // We don't touch in any way schemas not in layout.
@@ -83,38 +100,61 @@ let updateTriggers (db : SystemContext) (triggers : SourceTriggers) (cancellatio
             return updater
         }
 
-let private findBrokenTriggersEntity (schemaName : SchemaName) (trigEntityRef : ResolvedEntityRef) (entity : PreparedTriggersEntity) : TriggerRef seq =
+let private findBrokenTriggersEntity
+    (schemaName: SchemaName)
+    (trigEntityRef: ResolvedEntityRef)
+    (entity: PreparedTriggersEntity)
+    : TriggerRef seq =
     seq {
         for KeyValue(triggerName, maybeTrigger) in entity.Triggers do
             match maybeTrigger with
-            | Error e when not e.AllowBroken -> yield { Schema = schemaName; Entity = trigEntityRef; Name = triggerName }
+            | Error e when not e.AllowBroken ->
+                yield
+                    { Schema = schemaName
+                      Entity = trigEntityRef
+                      Name = triggerName }
             | _ -> ()
     }
 
-let private findBrokenTriggersSchema (schemaName : SchemaName) (trigSchemaName : SchemaName) (schema : PreparedTriggersSchema) : TriggerRef seq =
+let private findBrokenTriggersSchema
+    (schemaName: SchemaName)
+    (trigSchemaName: SchemaName)
+    (schema: PreparedTriggersSchema)
+    : TriggerRef seq =
     seq {
         for KeyValue(trigEntityName, entity) in schema.Entities do
-            yield! findBrokenTriggersEntity schemaName { Schema = trigSchemaName; Name = trigEntityName } entity
+            yield!
+                findBrokenTriggersEntity
+                    schemaName
+                    { Schema = trigSchemaName
+                      Name = trigEntityName }
+                    entity
     }
 
-let private findBrokenTriggersDatabase (schemaName : SchemaName) (db : PreparedTriggersDatabase) : TriggerRef seq =
+let private findBrokenTriggersDatabase (schemaName: SchemaName) (db: PreparedTriggersDatabase) : TriggerRef seq =
     seq {
         for KeyValue(trigSchemaName, schema) in db.Schemas do
             yield! findBrokenTriggersSchema schemaName trigSchemaName schema
     }
 
-let private findBrokenTriggers (triggers : PreparedTriggers) : TriggerRef seq =
+let private findBrokenTriggers (triggers: PreparedTriggers) : TriggerRef seq =
     seq {
         for KeyValue(schemaName, schema) in triggers.Schemas do
             yield! findBrokenTriggersDatabase schemaName schema
     }
 
-let private checkTriggerName (ref : TriggerRef) : Expr<Trigger -> bool> =
+let private checkTriggerName (ref: TriggerRef) : Expr<Trigger -> bool> =
     let checkEntity = checkEntityName ref.Entity
     let checkSchema = checkSchemaName ref.Schema
     let triggerName = string ref.Name
-    <@ fun triggers -> (%checkSchema) triggers.Schema && (%checkEntity) triggers.TriggerEntity && triggers.Name = triggerName @>
 
-let markBrokenTriggers (db : SystemContext) (triggers : PreparedTriggers) (cancellationToken : CancellationToken) : Task =
+    <@
+        fun triggers ->
+            (%checkSchema) triggers.Schema
+            && (%checkEntity) triggers.TriggerEntity
+            && triggers.Name = triggerName
+    @>
+
+let markBrokenTriggers (db: SystemContext) (triggers: PreparedTriggers) (cancellationToken: CancellationToken) : Task =
     let checks = findBrokenTriggers triggers |> Seq.map checkTriggerName
     genericMarkBroken db.Triggers checks cancellationToken

@@ -54,112 +54,97 @@ open OzmaDB.Triggers.Types
 open OzmaDB.Triggers.Source
 open OzmaDB.Triggers.Schema
 open OzmaDB.Triggers.Update
+
 module SQL = OzmaDB.SQL.AST
 module SQL = OzmaDB.SQL.DDL
 
-type RestoreSchemaException (message : string, innerException : exn, isUserException : bool) =
+type RestoreSchemaException(message: string, innerException: exn, isUserException: bool) =
     inherit UserException(message, innerException, isUserException)
 
-    new (message : string, innerException : exn) =
-        RestoreSchemaException (message, innerException, isUserException innerException)
+    new(message: string, innerException: exn) =
+        RestoreSchemaException(message, innerException, isUserException innerException)
 
-    new (message : string) = RestoreSchemaException (message, null, true)
+    new(message: string) = RestoreSchemaException(message, null, true)
 
 type PrettyColumnField =
-    { Type : string
-      DefaultValue : string option
-      IsNullable : bool
-      IsImmutable : bool
-      DefaultAttributes : SourceAttributesField option
+    { Type: string
+      DefaultValue: string option
+      IsNullable: bool
+      IsImmutable: bool
+      DefaultAttributes: SourceAttributesField option
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
 type PrettyComputedField =
-    { Expression : string
-      AllowBroken : bool
-      IsVirtual : bool
-      IsMaterialized : bool
-      DefaultAttributes : SourceAttributesField option
+    { Expression: string
+      AllowBroken: bool
+      IsVirtual: bool
+      IsMaterialized: bool
+      DefaultAttributes: SourceAttributesField option
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
 type PrettyEntity =
-    { ColumnFields : Map<FieldName, PrettyColumnField>
-      ComputedFields : Map<FieldName, PrettyComputedField>
-      UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
-      CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
-      Indexes : Map<IndexName, SourceIndex>
-      MainField : FieldName option
-      SaveRestoreKey : ConstraintName option
-      IsAbstract : bool
-      IsFrozen : bool
-      Parent : ResolvedEntityRef option
-      SystemDefaultAttributes : Map<FieldName, SourceAttributesField>
+    { ColumnFields: Map<FieldName, PrettyColumnField>
+      ComputedFields: Map<FieldName, PrettyComputedField>
+      UniqueConstraints: Map<ConstraintName, SourceUniqueConstraint>
+      CheckConstraints: Map<ConstraintName, SourceCheckConstraint>
+      Indexes: Map<IndexName, SourceIndex>
+      MainField: FieldName option
+      SaveRestoreKey: ConstraintName option
+      IsAbstract: bool
+      IsFrozen: bool
+      Parent: ResolvedEntityRef option
+      SystemDefaultAttributes: Map<FieldName, SourceAttributesField>
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
 type PrettyTriggerMeta =
-    { AllowBroken : bool
+    { AllowBroken: bool
       [<DefaultValue(0)>]
-      Priority : int
-      Time : TriggerTime
-      OnInsert : bool
-      OnUpdateFields : FieldName[]
-      OnDelete : bool
-    }
+      Priority: int
+      Time: TriggerTime
+      OnInsert: bool
+      OnUpdateFields: FieldName[]
+      OnDelete: bool }
 
-type PrettyActionMeta =
-    { AllowBroken : bool
-    }
+type PrettyActionMeta = { AllowBroken: bool }
 
-let private emptyPrettyActionMeta =
-    { AllowBroken = false } : PrettyActionMeta
+let private emptyPrettyActionMeta = { AllowBroken = false }: PrettyActionMeta
 
-type PrettyModuleMeta =
-    { AllowBroken : bool
-    }
+type PrettyModuleMeta = { AllowBroken: bool }
 
-let private emptyModuleActionMeta =
-    { AllowBroken = false } : PrettyModuleMeta
+let private emptyModuleActionMeta = { AllowBroken = false }: PrettyModuleMeta
 
-type PrettyUserViewMeta =
-    { AllowBroken : bool
-    }
+type PrettyUserViewMeta = { AllowBroken: bool }
 
-let private emptyPrettyUserViewMeta =
-    { AllowBroken = false } : PrettyUserViewMeta
+let private emptyPrettyUserViewMeta = { AllowBroken = false }: PrettyUserViewMeta
 
-type PrettyUserViewsGeneratorScriptMeta =
-    { AllowBroken : bool
-    }
+type PrettyUserViewsGeneratorScriptMeta = { AllowBroken: bool }
 
 let private emptyPrettyUserViewsGeneratorScriptMeta =
-    { AllowBroken = false } : PrettyUserViewsGeneratorScriptMeta
+    { AllowBroken = false }: PrettyUserViewsGeneratorScriptMeta
 
 type CustomEntitiesMap = Map<SchemaName, Map<EntityName, JsonMap[]>>
 
 type SchemaDump =
-    { Entities : Map<EntityName, SourceEntity>
-      Roles : Map<RoleName, SourceRole>
-      UserViews : Map<UserViewName, SourceUserView>
-      UserViewsGeneratorScript : SourceUserViewsGeneratorScript option
-      DefaultAttributes : Map<SchemaName, SourceAttributesSchema>
-      Modules : Map<ModulePath, SourceModule>
-      Actions : Map<ActionName, SourceAction>
-      Triggers : Map<SchemaName, SourceTriggersSchema>
-      CustomEntities : CustomEntitiesMap
+    { Entities: Map<EntityName, SourceEntity>
+      Roles: Map<RoleName, SourceRole>
+      UserViews: Map<UserViewName, SourceUserView>
+      UserViewsGeneratorScript: SourceUserViewsGeneratorScript option
+      DefaultAttributes: Map<SchemaName, SourceAttributesSchema>
+      Modules: Map<ModulePath, SourceModule>
+      Actions: Map<ActionName, SourceAction>
+      Triggers: Map<SchemaName, SourceTriggersSchema>
+      CustomEntities: CustomEntitiesMap
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
-let schemaDumpHasNoSchema (dump : SchemaDump) =
+let schemaDumpHasNoSchema (dump: SchemaDump) =
     Map.isEmpty dump.Entities
     && Map.isEmpty dump.Roles
     && Map.isEmpty dump.UserViews
@@ -169,11 +154,11 @@ let schemaDumpHasNoSchema (dump : SchemaDump) =
     && Map.isEmpty dump.Actions
     && Map.isEmpty dump.Triggers
 
-let schemaDumpIsEmpty (dump : SchemaDump) =
+let schemaDumpIsEmpty (dump: SchemaDump) =
     schemaDumpHasNoSchema dump
     && Map.forall (fun schemaName -> Map.forall (fun entityName entries -> Array.isEmpty entries)) dump.CustomEntities
 
-let emptySchemaDump : SchemaDump =
+let emptySchemaDump: SchemaDump =
     { Entities = Map.empty
       Roles = Map.empty
       UserViews = Map.empty
@@ -184,10 +169,9 @@ let emptySchemaDump : SchemaDump =
       Triggers = Map.empty
       CustomEntities = Map.empty
       Description = ""
-      Metadata = JsonMap.empty
-    }
+      Metadata = JsonMap.empty }
 
-let mergeSchemaDump (a : SchemaDump) (b : SchemaDump) : SchemaDump =
+let mergeSchemaDump (a: SchemaDump) (b: SchemaDump) : SchemaDump =
     { Entities = Map.unionUnique a.Entities b.Entities
       Roles = Map.unionUnique a.Roles b.Roles
       UserViews = Map.unionUnique a.UserViews b.UserViews
@@ -198,15 +182,24 @@ let mergeSchemaDump (a : SchemaDump) (b : SchemaDump) : SchemaDump =
       Triggers = Map.unionWith mergeSourceTriggersSchema a.Triggers b.Triggers
       CustomEntities = Map.unionWith Map.unionUnique a.CustomEntities b.CustomEntities
       Description = unionDescription a.Description b.Description
-      Metadata = unionMetadata a.Metadata b.Metadata
-    }
+      Metadata = unionMetadata a.Metadata b.Metadata }
 
-let private getSchemaByName (connection : DatabaseTransaction) (schemaName : SchemaName) (cancellationToken : CancellationToken) =
+let private getSchemaByName
+    (connection: DatabaseTransaction)
+    (schemaName: SchemaName)
+    (cancellationToken: CancellationToken)
+    =
     task {
         let schemaStr = string schemaName
-        let! schemas = connection.System.Schemas.Where(fun schema -> schema.Name = schemaStr).ToArrayAsync(cancellationToken)
+
+        let! schemas =
+            connection.System.Schemas
+                .Where(fun schema -> schema.Name = schemaStr)
+                .ToArrayAsync(cancellationToken)
+
         if Array.isEmpty schemas then
             failwithf "Schema %O not found" schemaName
+
         return schemas.[0]
     }
 
@@ -221,18 +214,26 @@ let private subEntityKey = "sub_entity"
 
 let private schemaArgName = OzmaQLName "schema_id"
 let private schemaArg = PLocal schemaArgName
-let private schemaArgType = requiredArgument (FTScalar (SFTReference (schemasNameFieldRef.Entity, None)))
+
+let private schemaArgType =
+    requiredArgument (FTScalar(SFTReference(schemasNameFieldRef.Entity, None)))
 
 type private FlatColumn = ResolvedFieldRef list
 
-type private ColumnSourceBuilder (layout : Layout, firstIndex : int) =
+type private ColumnSourceBuilder(layout: Layout, firstIndex: int) =
     let mutable schemaNamePath = None
     let mutable columns = List()
 
-    let rec getColumnSource (isSchemaKey : bool) (parentPath : FlatColumn) (fieldRef : ResolvedFieldRef) (field : ResolvedColumnField) : CustomEntityValueSource =
+    let rec getColumnSource
+        (isSchemaKey: bool)
+        (parentPath: FlatColumn)
+        (fieldRef: ResolvedFieldRef)
+        (field: ResolvedColumnField)
+        : CustomEntityValueSource =
         let path = fieldRef :: parentPath
+
         match field.FieldType with
-        | FTScalar (SFTReference (refEntityRef, opts)) ->
+        | FTScalar(SFTReference(refEntityRef, opts)) ->
             // First non-reference in (nested) save-restore keys is always schema name.
             if isSchemaKey && refEntityRef = schemasNameFieldRef.Entity then
                 assert (Option.isNone schemaNamePath)
@@ -242,23 +243,33 @@ type private ColumnSourceBuilder (layout : Layout, firstIndex : int) =
                 let refEntity = layout.FindEntity refEntityRef |> Option.get
                 let refKey = Option.get refEntity.SaveRestoreKey
                 let refConstr = Map.find refKey refEntity.UniqueConstraints
-                let sourceRef = getKeyColumnSources isSchemaKey path refEntityRef refEntity refConstr
-                CVSRef (refEntityRef, sourceRef)
+
+                let sourceRef =
+                    getKeyColumnSources isSchemaKey path refEntityRef refEntity refConstr
+
+                CVSRef(refEntityRef, sourceRef)
         | _ ->
             let idx = firstIndex + columns.Count
             let col = List.rev path
             columns.Add(col)
             CVSColumn idx
 
-    and getKeyColumnSources (isSchemaKey : bool) (path : FlatColumn) (entityRef : ResolvedEntityRef) (entity : ResolvedEntity) (constr : ResolvedUniqueConstraint) : CustomEntityObjectSource =
+    and getKeyColumnSources
+        (isSchemaKey: bool)
+        (path: FlatColumn)
+        (entityRef: ResolvedEntityRef)
+        (entity: ResolvedEntity)
+        (constr: ResolvedUniqueConstraint)
+        : CustomEntityObjectSource =
         let go (i, fieldName) =
             let field = Map.find fieldName entity.ColumnFields
             let fieldRef = { Entity = entityRef; Name = fieldName }
             let source = getColumnSource (i = 0 && isSchemaKey) path fieldRef field
             (fieldName, source)
+
         constr.Columns |> Seq.indexed |> Seq.map go |> Map.ofSeq
 
-    member this.GetColumnSource isSchemaKey (fieldRef : ResolvedFieldRef) =
+    member this.GetColumnSource isSchemaKey (fieldRef: ResolvedFieldRef) =
         let entity = layout.FindEntity fieldRef.Entity |> Option.get
         let field = Map.find fieldRef.Name entity.ColumnFields
         getColumnSource isSchemaKey [] fieldRef field
@@ -271,34 +282,34 @@ type private ColumnSourceBuilder (layout : Layout, firstIndex : int) =
     member this.Columns = columns :> IReadOnlyList<FlatColumn>
 
 type private PreparedSaveRestoreKey =
-    { Ref : ResolvedEntityRef
-      Fields : Set<FieldName>
-      FlatColumns : FlatColumn[]
-      SchemaNamePath : FlatColumn option
-      Sources : CustomEntityObjectSource
-    }
+    { Ref: ResolvedEntityRef
+      Fields: Set<FieldName>
+      FlatColumns: FlatColumn[]
+      SchemaNamePath: FlatColumn option
+      Sources: CustomEntityObjectSource }
 
-let private prepareSaveRestoreKey (layout : Layout) (entityRef : ResolvedEntityRef) : PreparedSaveRestoreKey =
+let private prepareSaveRestoreKey (layout: Layout) (entityRef: ResolvedEntityRef) : PreparedSaveRestoreKey =
     let entity = layout.FindEntity entityRef |> Option.get
     let key = Option.get entity.SaveRestoreKey
     let constr = Map.find key entity.UniqueConstraints
     let builder = ColumnSourceBuilder(layout, 0)
     let keyColumnSources = builder.GetKeyColumnSources true entityRef constr
+
     { Ref = entityRef
       Fields = Set.ofArray constr.Columns
       FlatColumns = builder.Columns.ToArray()
       SchemaNamePath = builder.SchemaNamePath
-      Sources = keyColumnSources
-    }
+      Sources = keyColumnSources }
 
 let private saveOneCustomEntity
-        (connection : DatabaseTransaction)
-        (layout : Layout)
-        (entityRef : ResolvedEntityRef)
-        (key : PreparedSaveRestoreKey)
-        (schemaId : int)
-        (cancellationToken : CancellationToken)
-        (f : IAsyncEnumerable<JsonMap> -> Task<'a>) : Task<'a> =
+    (connection: DatabaseTransaction)
+    (layout: Layout)
+    (entityRef: ResolvedEntityRef)
+    (key: PreparedSaveRestoreKey)
+    (schemaId: int)
+    (cancellationToken: CancellationToken)
+    (f: IAsyncEnumerable<JsonMap> -> Task<'a>)
+    : Task<'a> =
     task {
         let builder = ColumnSourceBuilder(layout, key.FlatColumns.Length)
 
@@ -308,29 +319,32 @@ let private saveOneCustomEntity
             else
                 let fieldRef = { Entity = entityRef; Name = fieldName }
                 let source = builder.GetColumnSource false fieldRef
-                Some (fieldName, source)
+                Some(fieldName, source)
 
         let entity = layout.FindEntity entityRef |> Option.get
 
         let dataColumnSources =
-            entity.ColumnFields
-            |> Map.keys
-            |> Seq.mapMaybe getData
-            |> Map.ofSeq
+            entity.ColumnFields |> Map.keys |> Seq.mapMaybe getData |> Map.ofSeq
 
         let combinedSources = Map.unionUnique key.Sources dataColumnSources
 
-        let getReference : ResolvedFieldRef list -> ResolvedFieldExpr = function
+        let getReference: ResolvedFieldRef list -> ResolvedFieldExpr =
+            function
             | [] -> failwith "Impossible"
             | fieldRef :: fullPath ->
-                let path = fullPath |> Seq.map (fun fieldRef -> { Name = fieldRef.Name; AsRoot = false }) |> Seq.toArray
+                let path =
+                    fullPath
+                    |> Seq.map (fun fieldRef -> { Name = fieldRef.Name; AsRoot = false })
+                    |> Seq.toArray
+
                 let boundPath = fullPath |> Seq.map (fun fieldRef -> fieldRef.Entity) |> Seq.toArray
+
                 let boundMeta =
                     { simpleColumnMeta entityRef with
                         IsInner = false
                         Path = path
-                        PathEntities = boundPath
-                    }
+                        PathEntities = boundPath }
+
                 let plainRef = relaxFieldRef fieldRef
                 makeSingleFieldExpr layout boundMeta plainRef
 
@@ -338,29 +352,45 @@ let private saveOneCustomEntity
             match key.SchemaNamePath with
             | None -> None
             | Some schemaPath ->
-                let schemaExpr = FERef { Ref = { Ref = VRArgument schemaArg; Path = [||]; AsRoot = false }; Extra = ObjectMap.empty }
-                Some <| FEBinaryOp (getReference schemaPath, BOEq, schemaExpr)
+                let schemaExpr =
+                    FERef
+                        { Ref =
+                            { Ref = VRArgument schemaArg
+                              Path = [||]
+                              AsRoot = false }
+                          Extra = ObjectMap.empty }
+
+                Some <| FEBinaryOp(getReference schemaPath, BOEq, schemaExpr)
 
         let resultColumns =
             Seq.append key.FlatColumns builder.Columns
             |> Seq.map (getReference >> queryColumnResult >> QRExpr)
             |> Seq.toArray
 
-        let from = FEntity { fromEntity (relaxEntityRef entityRef) with Only = true }
+        let from =
+            FEntity
+                { fromEntity (relaxEntityRef entityRef) with
+                    Only = true }
+
         let singleSelect =
             { emptySingleSelectExpr with
                 Results = resultColumns
                 From = Some from
-                Where = whereExpr
-            }
+                Where = whereExpr }
+
         let select = selectExpr (SSelect singleSelect)
+
         let (maybeCompiledSchemaArg, arguments) =
             match key.SchemaNamePath with
             | None -> (None, emptyArguments)
             | Some _ ->
-                let (compiledSchemaArg, arguments) = addArgument schemaArg schemaArgType emptyArguments
+                let (compiledSchemaArg, arguments) =
+                    addArgument schemaArg schemaArgType emptyArguments
+
                 (Some compiledSchemaArg, arguments)
+
         let (selectInfo, compiled) = compileSelectExpr layout arguments select
+
         let argumentValues =
             match maybeCompiledSchemaArg with
             | None -> Map.empty
@@ -371,51 +401,63 @@ let private saveOneCustomEntity
                 None
             else
                 Some <| JsonMap.fromObject entityRef
-        return! connection.Connection.Query.ExecuteQuery (string compiled) argumentValues cancellationToken <| fun columns rows ->
-            task {
-                let processRow (row : SQL.Value[]) =
-                    let rec mapObject (sources : CustomEntityObjectSource) : bool * JsonMap =
-                        let obj = JObject()
-                        let mutable nonNullFound = false
-                        for KeyValue(fieldName, source) in sources do
-                            match source with
-                            | CVSSchemaId -> ()
-                            | CVSColumn i ->
-                                let value = row.[i]
-                                match value with
-                                | SQL.VNull -> ()
-                                | _ -> nonNullFound <- true
-                                obj.[string fieldName] <- JToken.FromObject(value)
-                            | CVSRef (ref, refSources) ->
-                                let (innerHasData, inner) = mapObject refSources
-                                if innerHasData then
-                                    obj.[string fieldName] <- inner.Map :> JToken
-                                    nonNullFound <- true
-                                else
-                                    obj.[string fieldName] <- JValue.CreateNull()
-                        (nonNullFound, JsonMap obj)
-                    let (nonNullFound, obj) = mapObject combinedSources
-                    match subEntityObject with
-                    | None -> ()
-                    | Some subEntity -> obj.Map.[subEntityKey] <- subEntity.Map
-                    obj
 
-                let mapped = rows.Select(processRow)
-                return! f mapped
-            }
+        return!
+            connection.Connection.Query.ExecuteQuery (string compiled) argumentValues cancellationToken
+            <| fun columns rows ->
+                task {
+                    let processRow (row: SQL.Value[]) =
+                        let rec mapObject (sources: CustomEntityObjectSource) : bool * JsonMap =
+                            let obj = JObject()
+                            let mutable nonNullFound = false
+
+                            for KeyValue(fieldName, source) in sources do
+                                match source with
+                                | CVSSchemaId -> ()
+                                | CVSColumn i ->
+                                    let value = row.[i]
+
+                                    match value with
+                                    | SQL.VNull -> ()
+                                    | _ -> nonNullFound <- true
+
+                                    obj.[string fieldName] <- JToken.FromObject(value)
+                                | CVSRef(ref, refSources) ->
+                                    let (innerHasData, inner) = mapObject refSources
+
+                                    if innerHasData then
+                                        obj.[string fieldName] <- inner.Map :> JToken
+                                        nonNullFound <- true
+                                    else
+                                        obj.[string fieldName] <- JValue.CreateNull()
+
+                            (nonNullFound, JsonMap obj)
+
+                        let (nonNullFound, obj) = mapObject combinedSources
+
+                        match subEntityObject with
+                        | None -> ()
+                        | Some subEntity -> obj.Map.[subEntityKey] <- subEntity.Map
+
+                        obj
+
+                    let mapped = rows.Select(processRow)
+                    return! f mapped
+                }
     }
 
 let private saveCustomEntity
-        (connection : DatabaseTransaction)
-        (layout : Layout)
-        (key : PreparedSaveRestoreKey)
-        (schemaId : int)
-        (cancellationToken : CancellationToken)
-        (f : IAsyncEnumerable<JsonMap> -> Task<'a>) : Task<'a seq> =
+    (connection: DatabaseTransaction)
+    (layout: Layout)
+    (key: PreparedSaveRestoreKey)
+    (schemaId: int)
+    (cancellationToken: CancellationToken)
+    (f: IAsyncEnumerable<JsonMap> -> Task<'a>)
+    : Task<'a seq> =
     task {
         let mutable results = []
 
-        let getOne childRef (entity : ResolvedEntity) =
+        let getOne childRef (entity: ResolvedEntity) =
             task {
                 if not entity.IsAbstract then
                     let! ret = saveOneCustomEntity connection layout childRef key schemaId cancellationToken f
@@ -424,106 +466,137 @@ let private saveCustomEntity
 
         let parent = layout.FindEntity key.Ref |> Option.get
         do! getOne key.Ref parent
+
         for KeyValue(childRef, child) in parent.Children do
             let childEntity = layout.FindEntity childRef |> Option.get
             do! getOne childRef childEntity
+
         return List.toSeq results
     }
 
 let private saveCustomEntitiesById
-        (connection : DatabaseTransaction)
-        (layout : Layout)
-        (schemaId : int)
-        (schemaName : SchemaName)
-        (cancellationToken : CancellationToken) : Task<CustomEntitiesMap> =
-    let go (ref : ResolvedEntityRef) =
+    (connection: DatabaseTransaction)
+    (layout: Layout)
+    (schemaId: int)
+    (schemaName: SchemaName)
+    (cancellationToken: CancellationToken)
+    : Task<CustomEntitiesMap> =
+    let go (ref: ResolvedEntityRef) =
         task {
             if ref.Schema = funSchema then
                 return None
             else
                 let key = prepareSaveRestoreKey layout ref
+
                 match key.SchemaNamePath with
                 | None when schemaName <> ref.Schema -> return None
                 | _ ->
-                    let! rets = saveCustomEntity connection layout key schemaId cancellationToken <| fun rows -> task { return! rows.ToArrayAsync(cancellationToken) }
-                    return Some (ref, Array.concat rets)
+                    let! rets =
+                        saveCustomEntity connection layout key schemaId cancellationToken
+                        <| fun rows -> task { return! rows.ToArrayAsync(cancellationToken) }
+
+                    return Some(ref, Array.concat rets)
         }
+
     layout.SaveRestoredEntities
-        |> Seq.mapTask go
-        |> Task.map (
-            Seq.catMaybes
-                >> Seq.groupBy (fun (ref, entries) -> ref.Schema)
-                >> Seq.map (fun (schema, entries) -> (
-                    schema,
-                    entries
-                    |> Seq.map (fun (ref, entries) -> (ref.Name, entries))
-                    |> Map.ofSeq)
-                )
-                >> Map.ofSeq
-        )
+    |> Seq.mapTask go
+    |> Task.map (
+        Seq.catMaybes
+        >> Seq.groupBy (fun (ref, entries) -> ref.Schema)
+        >> Seq.map (fun (schema, entries) ->
+            (schema, entries |> Seq.map (fun (ref, entries) -> (ref.Name, entries)) |> Map.ofSeq))
+        >> Map.ofSeq
+    )
 
 let saveCustomEntities
-        (connection : DatabaseTransaction)
-        (layout : Layout)
-        (schemaName : SchemaName)
-        (cancellationToken : CancellationToken) : Task<CustomEntitiesMap> =
+    (connection: DatabaseTransaction)
+    (layout: Layout)
+    (schemaName: SchemaName)
+    (cancellationToken: CancellationToken)
+    : Task<CustomEntitiesMap> =
     task {
         let! schema = getSchemaByName connection schemaName cancellationToken
         return! saveCustomEntitiesById connection layout schema.Id schemaName cancellationToken
     }
 
 let private rawValuesName = OzmaQLName "raw"
-let private rawValuesRef = { Schema = None; Name = rawValuesName } : EntityRef
+let private rawValuesRef = { Schema = None; Name = rawValuesName }: EntityRef
 
 let private indexColumnName = OzmaQLName "__index"
 let private rawColumnName i = sprintf "col__%i" i |> OzmaQLName
 let private subKeyName i = sprintf "subkey__%i" i |> OzmaQLName
-let private isNotNullColumnName (name : FieldName) = sprintf "not_null__%O" name |> OzmaQLName
+
+let private isNotNullColumnName (name: FieldName) =
+    sprintf "not_null__%O" name |> OzmaQLName
 
 let private checkNotNullData
-        (connection : DatabaseTransaction)
-        (checkedColumns : (EntityName * EntityName) seq)
-        (tableRef : SQL.TableRef)
-        (cancellationToken : CancellationToken) : Task =
+    (connection: DatabaseTransaction)
+    (checkedColumns: (EntityName * EntityName) seq)
+    (tableRef: SQL.TableRef)
+    (cancellationToken: CancellationToken)
+    : Task =
     unitTask {
         let buildCheckColumn (fieldName, isNotNullColumn) =
-            let isNotNullExpr = SQL.VEColumn { Table = None; Name = compileName isNotNullColumn }
-            let resultExpr = SQL.VEColumn { Table = None; Name = compileName fieldName }
-            SQL.SCExpr (None, SQL.VEOr (SQL.VENot isNotNullExpr, SQL.VEIsNotNull resultExpr))
+            let isNotNullExpr =
+                SQL.VEColumn
+                    { Table = None
+                      Name = compileName isNotNullColumn }
+
+            let resultExpr =
+                SQL.VEColumn
+                    { Table = None
+                      Name = compileName fieldName }
+
+            SQL.SCExpr(None, SQL.VEOr(SQL.VENot isNotNullExpr, SQL.VEIsNotNull resultExpr))
+
         let checkColumns = Seq.map buildCheckColumn checkedColumns
 
-        let indexExpr = SQL.VEColumn { Table = None; Name = compileName indexColumnName }
-        let indexColumn = SQL.SCExpr (None, indexExpr)
+        let indexExpr =
+            SQL.VEColumn
+                { Table = None
+                  Name = compileName indexColumnName }
+
+        let indexColumn = SQL.SCExpr(None, indexExpr)
+
         let singleSelect =
             { SQL.emptySingleSelectExpr with
                 Columns = Seq.append (Seq.singleton indexColumn) checkColumns |> Seq.toArray
-                From = Some <| SQL.FTable (SQL.fromTable tableRef)
-            }
+                From = Some <| SQL.FTable(SQL.fromTable tableRef) }
+
         let select = SQL.selectExpr (SQL.SSelect singleSelect)
 
-        do! connection.Connection.Query.ExecuteQuery (string select) Map.empty cancellationToken <| fun columns rows ->
-            task {
-                let processRow (row : SQL.Value[]) =
-                    for (i, (fieldName, isNotNullColumn)) in Seq.indexed checkedColumns do
-                        if not <| SQL.parseBoolValue row.[i + 1] then
-                            let index = SQL.parseIntValue row.[0]
-                            raisef RestoreSchemaException "Error at row %i: failed to find referenced entity for field %s" index (toOzmaQLString fieldName)
-                do! rows.ForEachAsync(processRow, cancellationToken)
-            }
+        do!
+            connection.Connection.Query.ExecuteQuery (string select) Map.empty cancellationToken
+            <| fun columns rows ->
+                task {
+                    let processRow (row: SQL.Value[]) =
+                        for (i, (fieldName, isNotNullColumn)) in Seq.indexed checkedColumns do
+                            if not <| SQL.parseBoolValue row.[i + 1] then
+                                let index = SQL.parseIntValue row.[0]
+
+                                raisef
+                                    RestoreSchemaException
+                                    "Error at row %i: failed to find referenced entity for field %s"
+                                    index
+                                    (toOzmaQLString fieldName)
+
+                    do! rows.ForEachAsync(processRow, cancellationToken)
+                }
     }
 
 // Creates temporary table with restored entities.
 // One can detect existing entities by `id IS NOT NULL`.
 let private loadRestoredRows
-        (layout : Layout)
-        (connection : DatabaseTransaction)
-        (entityRef : ResolvedEntityRef)
-        (key : PreparedSaveRestoreKey)
-        (schemaId : int)
-        (rows : JsonMap seq)
-        (cancellationToken : CancellationToken) : Task<SQL.TableRef * Set<FieldName>> =
+    (layout: Layout)
+    (connection: DatabaseTransaction)
+    (entityRef: ResolvedEntityRef)
+    (key: PreparedSaveRestoreKey)
+    (schemaId: int)
+    (rows: JsonMap seq)
+    (cancellationToken: CancellationToken)
+    : Task<SQL.TableRef * Set<FieldName>> =
     task {
-        let addUsedFields usedFields (row : JsonMap) =
+        let addUsedFields usedFields (row: JsonMap) =
             row |> Seq.fold (fun usedFields prop -> Set.add prop.Key usedFields) usedFields
 
         let usedFields = rows |> Seq.fold addUsedFields Set.empty
@@ -531,19 +604,20 @@ let private loadRestoredRows
         let builder = ColumnSourceBuilder(layout, key.FlatColumns.Length)
 
         let getData (fieldName, field) =
-            if Set.contains fieldName key.Fields || (fieldIsOptional field && not (Set.contains (string fieldName) usedFields)) then
+            if
+                Set.contains fieldName key.Fields
+                || (fieldIsOptional field && not (Set.contains (string fieldName) usedFields))
+            then
                 None
             else
                 let fieldRef = { Entity = entityRef; Name = fieldName }
                 let source = builder.GetColumnSource false fieldRef
-                Some (fieldName, source)
+                Some(fieldName, source)
 
         let entity = layout.FindEntity entityRef |> Option.get
+
         let dataColumnSources =
-            entity.ColumnFields
-            |> Map.toSeq
-            |> Seq.mapMaybe getData
-            |> Map.ofSeq
+            entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getData |> Map.ofSeq
 
         let combinedSources = Map.unionUnique key.Sources dataColumnSources
 
@@ -551,38 +625,50 @@ let private loadRestoredRows
             match key.SchemaNamePath with
             | None -> (emptyArguments, Map.empty)
             | Some _ ->
-                let (compiledSchemaArg, arguments) = addArgument schemaArg schemaArgType emptyArguments
+                let (compiledSchemaArg, arguments) =
+                    addArgument schemaArg schemaArgType emptyArguments
+
                 (arguments, Map.singleton compiledSchemaArg.PlaceholderId (SQL.VInt schemaId))
 
         let allColumns = Seq.append key.FlatColumns builder.Columns |> Seq.toArray
 
-        let getRawArgument (col : FlatColumn) =
+        let getRawArgument (col: FlatColumn) =
             let finalFieldRef = List.last col
             let finalEntity = layout.FindEntity finalFieldRef.Entity |> Option.get
             let finalField = Map.find finalFieldRef.Name finalEntity.ColumnFields
-            { requiredArgument finalField.FieldType with Optional = finalField.IsNullable }
+
+            { requiredArgument finalField.FieldType with
+                Optional = finalField.IsNullable }
+
         let argumentsRow = allColumns |> Seq.map getRawArgument |> Seq.toArray
 
-        let valueToArgument (arg : ResolvedArgument) (v : FieldValue) : ResolvedFieldExpr =
+        let valueToArgument (arg: ResolvedArgument) (v: FieldValue) : ResolvedFieldExpr =
             let (compiledArg, name, newArguments) = addAnonymousArgument arg arguments
             arguments <- newArguments
             argumentValues <- Map.add compiledArg.PlaceholderId (compileFieldValue v) argumentValues
-            resolvedRefFieldExpr <| VRArgument (PLocal name)
+            resolvedRefFieldExpr <| VRArgument(PLocal name)
 
-        let lookupField (fieldRef : ResolvedFieldRef) =
+        let lookupField (fieldRef: ResolvedFieldRef) =
             let currEntity = layout.FindEntity fieldRef.Entity |> Option.get
             let currField = Map.find fieldRef.Name currEntity.ColumnFields
             (fieldRef, currField)
+
         let columnsWithFields = allColumns |> Array.map (List.map lookupField)
 
         let indexArgument = requiredArgument (FTScalar SFTInt)
 
-        let getSourceRow (rowIndex : int, topRow : JsonMap) =
-            let rec getRowValue (parentPath : FieldName list) (attrs : JsonMap) : (ResolvedFieldRef * ResolvedColumnField) list -> FieldValue = function
+        let getSourceRow (rowIndex: int, topRow: JsonMap) =
+            let rec getRowValue
+                (parentPath: FieldName list)
+                (attrs: JsonMap)
+                : (ResolvedFieldRef * ResolvedColumnField) list -> FieldValue =
+                function
                 | [] -> failwith "Impossible"
-                | [(fieldRef, field)] ->
+                | [ (fieldRef, field) ] ->
                     let inline getPathString () =
-                        Seq.rev (fieldRef.Name :: parentPath) |> Seq.map toOzmaQLString |> String.concat "."
+                        Seq.rev (fieldRef.Name :: parentPath)
+                        |> Seq.map toOzmaQLString
+                        |> String.concat "."
 
                     match attrs.TryGetValue(string fieldRef.Name) with
                     | (false, _) ->
@@ -591,20 +677,38 @@ let private loadRestoredRows
                         | _ when field.IsNullable -> FNull
                         | None ->
                             let currPath = getPathString ()
-                            raisef RestoreSchemaException "Error at row %i, path %s: attribute not found" rowIndex currPath
+
+                            raisef
+                                RestoreSchemaException
+                                "Error at row %i, path %s: attribute not found"
+                                rowIndex
+                                currPath
                     | (true, attr) ->
                         if attr.Type = JTokenType.Null && not field.IsNullable then
                             let currPath = getPathString ()
-                            raisef RestoreSchemaException "Error at row %i, path %s: value cannot be null" rowIndex currPath
+
+                            raisef
+                                RestoreSchemaException
+                                "Error at row %i, path %s: value cannot be null"
+                                rowIndex
+                                currPath
                         else
                             match parseValueFromJson field.FieldType attr with
                             | None ->
                                 let currPath = getPathString ()
-                                raisef RestoreSchemaException "Error at row %i, path %s: cannot convert value to type %O" rowIndex currPath field.FieldType
+
+                                raisef
+                                    RestoreSchemaException
+                                    "Error at row %i, path %s: cannot convert value to type %O"
+                                    rowIndex
+                                    currPath
+                                    field.FieldType
                             | Some v -> v
                 | (fieldRef, field) :: nextPath ->
                     let inline getPathString () =
-                        Seq.rev (fieldRef.Name :: parentPath) |> Seq.map toOzmaQLString |> String.concat "."
+                        Seq.rev (fieldRef.Name :: parentPath)
+                        |> Seq.map toOzmaQLString
+                        |> String.concat "."
 
                     let inline returnKeyNull () =
                         // Default values are not used for key lookups.
@@ -612,31 +716,46 @@ let private loadRestoredRows
                             FNull
                         else
                             let currPath = getPathString ()
-                            raisef RestoreSchemaException "Error at row %i, path %s: attribute not found" rowIndex currPath
+
+                            raisef
+                                RestoreSchemaException
+                                "Error at row %i, path %s: attribute not found"
+                                rowIndex
+                                currPath
 
                     match attrs.TryGetValue(string fieldRef.Name) with
                     | (false, _) -> returnKeyNull ()
                     | (true, attr) ->
                         match attr with
-                        | :? JObject as innerAttrs -> getRowValue (fieldRef.Name :: parentPath) (JsonMap innerAttrs) nextPath
+                        | :? JObject as innerAttrs ->
+                            getRowValue (fieldRef.Name :: parentPath) (JsonMap innerAttrs) nextPath
                         | value when value.Type = JTokenType.Null -> returnKeyNull ()
                         | _ ->
                             let currPath = getPathString ()
                             raisef RestoreSchemaException "Error at row %i, path %s: sub-key expected" rowIndex currPath
 
             let indexColumn = valueToArgument indexArgument (FInt rowIndex)
-            let rawValues = columnsWithFields |> Seq.map (getRowValue [] topRow) |> Seq.map2 valueToArgument argumentsRow
-            Seq.append (Seq.singleton indexColumn) rawValues |> Seq.map VVExpr |> Seq.toArray
+
+            let rawValues =
+                columnsWithFields
+                |> Seq.map (getRowValue [] topRow)
+                |> Seq.map2 valueToArgument argumentsRow
+
+            Seq.append (Seq.singleton indexColumn) rawValues
+            |> Seq.map VVExpr
+            |> Seq.toArray
 
         let rawValues = rows |> Seq.indexed |> Seq.map getSourceRow |> Seq.toArray
         let rawSelect = SValues rawValues |> selectExpr
-        let rawDataColumnNames = seq { 0..allColumns.Length - 1 } |> Seq.map rawColumnName
-        let rawColumnNames = Seq.append (Seq.singleton indexColumnName) rawDataColumnNames |> Seq.toArray
+        let rawDataColumnNames = seq { 0 .. allColumns.Length - 1 } |> Seq.map rawColumnName
+
+        let rawColumnNames =
+            Seq.append (Seq.singleton indexColumnName) rawDataColumnNames |> Seq.toArray
 
         let rawAlias =
             { Name = rawValuesName
-              Fields = Some rawColumnNames
-            } : EntityAlias
+              Fields = Some rawColumnNames }
+            : EntityAlias
 
         let schemaIdExpr = resolvedRefFieldExpr <| VRArgument schemaArg
 
@@ -644,99 +763,167 @@ let private loadRestoredRows
         let mutable lastSubkeyId = 0
         let mutable checkNotNull = []
 
-        let buildDataColumn (resultName : FieldName) (resultSource : CustomEntityValueSource) =
-            let rec getValueColumn (source : CustomEntityValueSource) : ResolvedFieldExpr =
+        let buildDataColumn (resultName: FieldName) (resultSource: CustomEntityValueSource) =
+            let rec getValueColumn (source: CustomEntityValueSource) : ResolvedFieldExpr =
                 match source with
                 | CVSSchemaId -> schemaIdExpr
-                | CVSColumn i -> resolvedRefFieldExpr <| VRColumn { Entity = Some rawValuesRef; Name = rawColumnName i }
-                | CVSRef (entityRef, attrs) ->
+                | CVSColumn i ->
+                    resolvedRefFieldExpr
+                    <| VRColumn
+                        { Entity = Some rawValuesRef
+                          Name = rawColumnName i }
+                | CVSRef(entityRef, attrs) ->
                     let thisKeyName = subKeyName lastSubkeyId
                     lastSubkeyId <- lastSubkeyId + 1
-                    let thisKeyRef = { Schema = None; Name = thisKeyName } : EntityRef
+                    let thisKeyRef = { Schema = None; Name = thisKeyName }: EntityRef
 
-                    let referenceFrom = FEntity { fromEntity (relaxEntityRef entityRef) with Alias = Some thisKeyName }
+                    let referenceFrom =
+                        FEntity
+                            { fromEntity (relaxEntityRef entityRef) with
+                                Alias = Some thisKeyName }
 
                     let buildKeyAttrCheck (subkeyName, subkeySource) =
                         let keyIdExpr = getValueColumn subkeySource
-                        let referenceFieldExpr = resolvedRefFieldExpr <| VRColumn { Entity = Some thisKeyRef; Name = subkeyName } : ResolvedFieldExpr
-                        FEBinaryOp (keyIdExpr, BOEq, referenceFieldExpr)
 
-                    let joinCheck = attrs |> Map.toSeq |> Seq.map buildKeyAttrCheck |> Seq.fold1 (curry FEAnd)
+                        let referenceFieldExpr =
+                            resolvedRefFieldExpr
+                            <| VRColumn
+                                { Entity = Some thisKeyRef
+                                  Name = subkeyName }
+                            : ResolvedFieldExpr
+
+                        FEBinaryOp(keyIdExpr, BOEq, referenceFieldExpr)
+
+                    let joinCheck =
+                        attrs |> Map.toSeq |> Seq.map buildKeyAttrCheck |> Seq.fold1 (curry FEAnd)
+
                     let join =
                         { A = from
                           B = referenceFrom
                           Type = Left
-                          Condition = joinCheck
-                        }
+                          Condition = joinCheck }
+
                     from <- FJoin join
-                    resolvedRefFieldExpr <| VRColumn { Entity = Some thisKeyRef; Name = funId }
+
+                    resolvedRefFieldExpr
+                    <| VRColumn
+                        { Entity = Some thisKeyRef
+                          Name = funId }
 
             let dataExpr = getValueColumn resultSource
-            let dataColumn = { queryColumnResult dataExpr with Alias = Some resultName }
+
+            let dataColumn =
+                { queryColumnResult dataExpr with
+                    Alias = Some resultName }
 
             let field = Map.find resultName entity.ColumnFields
+
             let isNotNullColumn =
                 match field.FieldType with
-                | FTScalar (SFTReference (refEntityRef, opts)) when field.IsNullable ->
+                | FTScalar(SFTReference(refEntityRef, opts)) when field.IsNullable ->
                     // We check if any related column is null, because the only way that can happen is if the top-level reference itself is NULL.
                     // That's, in turn, because we forbid nullable columns in alternate keys.
-                    let rec getColumn = function
+                    let rec getColumn =
+                        function
                         | CVSSchemaId -> None
-                        | CVSColumn i ->  Some i
-                        | CVSRef (entityRef, attrs) -> attrs |> Map.values |> Seq.mapMaybe getColumn |> Seq.first
+                        | CVSColumn i -> Some i
+                        | CVSRef(entityRef, attrs) -> attrs |> Map.values |> Seq.mapMaybe getColumn |> Seq.first
+
                     let anyColumn = getColumn resultSource |> Option.get |> rawColumnName
-                    let anyFieldRef = { Entity = Some rawValuesRef; Name = anyColumn } : FieldRef
+
+                    let anyFieldRef =
+                        { Entity = Some rawValuesRef
+                          Name = anyColumn }
+                        : FieldRef
+
                     let anyRef = resolvedRefFieldExpr <| VRColumn anyFieldRef
                     let colName = isNotNullColumnName resultName
                     checkNotNull <- (resultName, colName) :: checkNotNull
-                    Seq.singleton { queryColumnResult (FEIsNotNull anyRef) with Alias = Some colName }
+
+                    Seq.singleton
+                        { queryColumnResult (FEIsNotNull anyRef) with
+                            Alias = Some colName }
                 | _ -> Seq.empty
 
             let cols = Seq.append isNotNullColumn (Seq.singleton dataColumn)
             (dataExpr, cols)
 
         let sourceRef = relaxEntityRef entityRef
-        let sourceIdExpr = resolvedRefFieldExpr <| VRColumn { Entity = Some sourceRef; Name = funId } : ResolvedFieldExpr
+
+        let sourceIdExpr =
+            resolvedRefFieldExpr
+            <| VRColumn
+                { Entity = Some sourceRef
+                  Name = funId }
+            : ResolvedFieldExpr
+
         let idColumn = queryColumnResult sourceIdExpr
 
-        let indexExpr = resolvedRefFieldExpr <| VRColumn { Entity = Some rawValuesRef; Name = indexColumnName } : ResolvedFieldExpr
+        let indexExpr =
+            resolvedRefFieldExpr
+            <| VRColumn
+                { Entity = Some rawValuesRef
+                  Name = indexColumnName }
+            : ResolvedFieldExpr
+
         let indexColumn = queryColumnResult indexExpr
 
         let dataColumnExprs = combinedSources |> Map.map buildDataColumn
         let dataColumns = dataColumnExprs |> Map.values |> Seq.collect snd
-        let resultColumns = Seq.append (seq { indexColumn; idColumn }) dataColumns |> Seq.map QRExpr |> Seq.toArray
 
-        let buildKeyAttrCheck (fieldName : FieldName) =
+        let resultColumns =
+            Seq.append
+                (seq {
+                    indexColumn
+                    idColumn
+                })
+                dataColumns
+            |> Seq.map QRExpr
+            |> Seq.toArray
+
+        let buildKeyAttrCheck (fieldName: FieldName) =
             let (fieldExpr, columns) = Map.find fieldName dataColumnExprs
 
-            let sourceFieldRef = resolvedRefFieldExpr <| VRColumn { Entity = Some sourceRef; Name = fieldName } : ResolvedFieldExpr
-            FEBinaryOp (fieldExpr, BOEq, sourceFieldRef)
+            let sourceFieldRef =
+                resolvedRefFieldExpr
+                <| VRColumn
+                    { Entity = Some sourceRef
+                      Name = fieldName }
+                : ResolvedFieldExpr
+
+            FEBinaryOp(fieldExpr, BOEq, sourceFieldRef)
 
         let joinCheck = key.Fields |> Seq.map buildKeyAttrCheck |> Seq.fold1 (curry FEAnd)
-        let sourceFrom = FEntity { fromEntity sourceRef with Only = true }
+
+        let sourceFrom =
+            FEntity
+                { fromEntity sourceRef with
+                    Only = true }
+
         let sourceJoin =
             { A = from
               B = sourceFrom
               Type = Left
-              Condition = joinCheck
-            }
+              Condition = joinCheck }
 
         let singleSelect =
             { emptySingleSelectExpr with
                 Results = resultColumns
-                From = Some <| FJoin sourceJoin
-            }
+                From = Some <| FJoin sourceJoin }
+
         let select = selectExpr (SSelect singleSelect)
         let (selectInfo, compiled) = compileSelectExpr layout arguments select
 
         let dataTableName = connection.NewAnonymousSQLName "restored_data"
-        let dataTableRef = { Schema = None; Name = dataTableName } : SQL.TableRef
+        let dataTableRef = { Schema = None; Name = dataTableName }: SQL.TableRef
+
         let dataTable =
             { Table = dataTableRef
               Query = compiled
               Columns = None
-              Temporary = Some { OnCommit = Some SQL.CADrop }
-            } : SQL.CreateTableAsOperation
+              Temporary = Some { OnCommit = Some SQL.CADrop } }
+            : SQL.CreateTableAsOperation
+
         let! _ = connection.Connection.Query.ExecuteNonQuery (string dataTable) argumentValues cancellationToken
 
         // Check that for all non-NULL values references have been found.
@@ -747,144 +934,186 @@ let private loadRestoredRows
     }
 
 let private insertRestoredRows
-        (layout : Layout)
-        (connection : DatabaseTransaction)
-        (entityRef : ResolvedEntityRef)
-        (key : PreparedSaveRestoreKey)
-        (availableColumns : Set<FieldName>)
-        (dataTableRef : SQL.TableRef)
-        (idsTableRef : SQL.TableRef)
-        (cancellationToken : CancellationToken) : Task =
+    (layout: Layout)
+    (connection: DatabaseTransaction)
+    (entityRef: ResolvedEntityRef)
+    (key: PreparedSaveRestoreKey)
+    (availableColumns: Set<FieldName>)
+    (dataTableRef: SQL.TableRef)
+    (idsTableRef: SQL.TableRef)
+    (cancellationToken: CancellationToken)
+    : Task =
     unitTask {
         let allFields = Seq.append key.Fields availableColumns |> Seq.toArray
 
-        let getSourceColumn (fieldName : FieldName) =
-            let resultExpr = SQL.VEColumn { Table = None; Name = compileName fieldName }
-            SQL.SCExpr (None, resultExpr)
+        let getSourceColumn (fieldName: FieldName) =
+            let resultExpr =
+                SQL.VEColumn
+                    { Table = None
+                      Name = compileName fieldName }
+
+            SQL.SCExpr(None, resultExpr)
+
         let dataColumns = Seq.map getSourceColumn allFields
 
         let entity = layout.FindEntity entityRef |> Option.get
+
         let (subEntityFields, subEntityColumns) =
             if not <| hasSubType entity then
                 (Seq.empty, Seq.empty)
             else
-                let col = SQL.SCExpr (None, SQL.VEValue (SQL.VString entity.TypeName))
+                let col = SQL.SCExpr(None, SQL.VEValue(SQL.VString entity.TypeName))
                 (Seq.singleton sqlFunSubEntity, Seq.singleton col)
 
         let columns = Seq.append subEntityColumns dataColumns |> Seq.toArray
         let idExpr = SQL.VEColumn { Table = None; Name = sqlFunId }
+
         let singleSelect =
             { SQL.emptySingleSelectExpr with
                 Columns = columns
-                From = Some <| SQL.FTable (SQL.fromTable dataTableRef)
-                Where = Some <| SQL.VEIsNull idExpr
-            }
+                From = Some <| SQL.FTable(SQL.fromTable dataTableRef)
+                Where = Some <| SQL.VEIsNull idExpr }
+
         let select = SQL.selectExpr (SQL.SSelect singleSelect)
 
-        let getDataField (fieldName : FieldName) =
+        let getDataField (fieldName: FieldName) =
             let field = Map.tryFind fieldName entity.ColumnFields |> Option.get
             field.ColumnName
+
         let dataFields = allFields |> Seq.map getDataField
 
-        let fields = Seq.append subEntityFields dataFields |> Seq.map (fun col -> (null, col)) |> Seq.toArray
-        let insertedRef = compileResolvedEntityRef entity.Root : SQL.TableRef
+        let fields =
+            Seq.append subEntityFields dataFields
+            |> Seq.map (fun col -> (null, col))
+            |> Seq.toArray
+
+        let insertedRef = compileResolvedEntityRef entity.Root: SQL.TableRef
         let idExpr = SQL.VEColumn { Table = None; Name = sqlFunId }
+
         let innerInsert =
             { SQL.insertExpr (SQL.operationTable insertedRef) (SQL.ISSelect select) with
                 Columns = fields
-                Returning = [|SQL.SCExpr (None, idExpr)|]
-            }
+                Returning = [| SQL.SCExpr(None, idExpr) |] }
 
         // Place inserted ids into given temporary table.
         let auxName = SQL.SQLName "aux"
-        let auxRef = { Schema = None; Name = auxName } : SQL.TableRef
+        let auxRef = { Schema = None; Name = auxName }: SQL.TableRef
+
         let idsSingleSelect =
             { SQL.emptySingleSelectExpr with
-                Columns = [|SQL.SCAll None|]
-                From = Some <| SQL.FTable (SQL.fromTable auxRef)
-            }
+                Columns = [| SQL.SCAll None |]
+                From = Some <| SQL.FTable(SQL.fromTable auxRef) }
+
         let idsSelect = SQL.selectExpr (SQL.SSelect idsSingleSelect)
 
-        let idsCTE = { SQL.commonTableExpr (SQL.DEInsert innerInsert) with Materialized = Some true }
+        let idsCTE =
+            { SQL.commonTableExpr (SQL.DEInsert innerInsert) with
+                Materialized = Some true }
+
         let outerSelect =
             { SQL.insertExpr (SQL.operationTable idsTableRef) (SQL.ISSelect idsSelect) with
-                CTEs = Some <| SQL.commonTableExprs [|(auxName, idsCTE)|]
-                Columns = [|(null, sqlFunId)|]
-            }
+                CTEs = Some <| SQL.commonTableExprs [| (auxName, idsCTE) |]
+                Columns = [| (null, sqlFunId) |] }
+
         let! _ = connection.Connection.Query.ExecuteNonQuery (string outerSelect) Map.empty cancellationToken
         ()
     }
 
 let private updateRestoredRows
-        (layout : Layout)
-        (connection : DatabaseTransaction)
-        (entityRef : ResolvedEntityRef)
-        (availableColumns : Set<FieldName>)
-        (dataTableRef : SQL.TableRef)
-        (cancellationToken : CancellationToken) : Task<SQL.TableRef> =
+    (layout: Layout)
+    (connection: DatabaseTransaction)
+    (entityRef: ResolvedEntityRef)
+    (availableColumns: Set<FieldName>)
+    (dataTableRef: SQL.TableRef)
+    (cancellationToken: CancellationToken)
+    : Task<SQL.TableRef> =
     task {
         let entity = layout.FindEntity entityRef |> Option.get
 
-        let getAssignment (fieldName : FieldName) =
+        let getAssignment (fieldName: FieldName) =
             let field = Map.tryFind fieldName entity.ColumnFields |> Option.get
-            let resultExpr = SQL.VEColumn { Table = Some dataTableRef; Name = compileName fieldName }
-            SQL.UAESet (SQL.updateColumnName field.ColumnName, SQL.IVExpr resultExpr)
+
+            let resultExpr =
+                SQL.VEColumn
+                    { Table = Some dataTableRef
+                      Name = compileName fieldName }
+
+            SQL.UAESet(SQL.updateColumnName field.ColumnName, SQL.IVExpr resultExpr)
+
         let assignments = Seq.map getAssignment availableColumns |> Seq.toArray
 
-        let updatedRef = compileResolvedEntityRef entity.Root : SQL.TableRef
-        let updatedIdExpr = SQL.VEColumn { Table = Some updatedRef; Name = sqlFunId }
-        let sourceIdExpr = SQL.VEColumn { Table = Some dataTableRef; Name = sqlFunId }
-        let idCheck = SQL.VEBinaryOp (sourceIdExpr, SQL.BOEq, updatedIdExpr)
+        let updatedRef = compileResolvedEntityRef entity.Root: SQL.TableRef
+
+        let updatedIdExpr =
+            SQL.VEColumn
+                { Table = Some updatedRef
+                  Name = sqlFunId }
+
+        let sourceIdExpr =
+            SQL.VEColumn
+                { Table = Some dataTableRef
+                  Name = sqlFunId }
+
+        let idCheck = SQL.VEBinaryOp(sourceIdExpr, SQL.BOEq, updatedIdExpr)
 
         let update =
             { SQL.updateExpr (SQL.operationTable updatedRef) with
                 Assignments = assignments
-                From = Some <| SQL.FTable (SQL.fromTable dataTableRef)
-                Returning = [|SQL.SCExpr (None, updatedIdExpr)|]
-                Where = Some idCheck
-            }
+                From = Some <| SQL.FTable(SQL.fromTable dataTableRef)
+                Returning = [| SQL.SCExpr(None, updatedIdExpr) |]
+                Where = Some idCheck }
 
         // Place updated ids into a separate temporary table.
         let auxName = SQL.SQLName "aux"
-        let auxRef = { Schema = None; Name = auxName } : SQL.TableRef
+        let auxRef = { Schema = None; Name = auxName }: SQL.TableRef
+
         let idsSingleSelect =
             { SQL.emptySingleSelectExpr with
-                Columns = [|SQL.SCAll None|]
-                From = Some <| SQL.FTable (SQL.fromTable auxRef)
-            }
-        let idsCTE = { SQL.commonTableExpr (SQL.DEUpdate update) with Materialized = Some true }
+                Columns = [| SQL.SCAll None |]
+                From = Some <| SQL.FTable(SQL.fromTable auxRef) }
+
+        let idsCTE =
+            { SQL.commonTableExpr (SQL.DEUpdate update) with
+                Materialized = Some true }
+
         let idsSelect =
             { SQL.selectExpr (SQL.SSelect idsSingleSelect) with
-                CTEs = Some <| SQL.commonTableExprs [|(auxName, idsCTE)|]
-            }
+                CTEs = Some <| SQL.commonTableExprs [| (auxName, idsCTE) |] }
+
         let idsTableName = connection.NewAnonymousSQLName "restored_ids"
-        let idsTableRef = { Schema = None; Name = idsTableName } : SQL.TableRef
+        let idsTableRef = { Schema = None; Name = idsTableName }: SQL.TableRef
+
         let idsTable =
             { Table = idsTableRef
               Query = idsSelect
               Columns = None
-              Temporary = Some { OnCommit = Some SQL.CADrop }
-            } : SQL.CreateTableAsOperation
+              Temporary = Some { OnCommit = Some SQL.CADrop } }
+            : SQL.CreateTableAsOperation
+
         let! _ = connection.Connection.Query.ExecuteNonQuery (string idsTable) Map.empty cancellationToken
 
         return idsTableRef
     }
 
 let private deleteNonRestoredRows
-        (layout : Layout)
-        (connection : DatabaseTransaction)
-        (entityRef : ResolvedEntityRef)
-        (key : PreparedSaveRestoreKey)
-        (schemaId : int)
-        (maybeIdsTableRef : SQL.TableRef option)
-        (cancellationToken : CancellationToken) : Task =
+    (layout: Layout)
+    (connection: DatabaseTransaction)
+    (entityRef: ResolvedEntityRef)
+    (key: PreparedSaveRestoreKey)
+    (schemaId: int)
+    (maybeIdsTableRef: SQL.TableRef option)
+    (cancellationToken: CancellationToken)
+    : Task =
     unitTask {
         let (arguments, argumentValues, schemaCheck) =
             match key.SchemaNamePath with
             | None -> (emptyArguments, Map.empty, None)
             | Some schemaNamePath ->
-                let (compiledSchemaArg, arguments) = addArgument schemaArg schemaArgType emptyArguments
-                let argumentValues = Map.singleton compiledSchemaArg.PlaceholderId (SQL.VInt schemaId)
+                let (compiledSchemaArg, arguments) =
+                    addArgument schemaArg schemaArgType emptyArguments
+
+                let argumentValues =
+                    Map.singleton compiledSchemaArg.PlaceholderId (SQL.VInt schemaId)
 
                 let (schemaKey, schemaPath) =
                     match schemaNamePath with
@@ -892,40 +1121,62 @@ let private deleteNonRestoredRows
                     | key :: path -> (key, path)
 
                 let boundPath = schemaPath |> Seq.map (fun ref -> ref.Entity) |> Seq.toArray
-                let arrowPath = schemaPath |> Seq.map (fun ref -> { Name = ref.Name; AsRoot = false }) |> Seq.toArray
+
+                let arrowPath =
+                    schemaPath
+                    |> Seq.map (fun ref -> { Name = ref.Name; AsRoot = false })
+                    |> Seq.toArray
+
                 let boundMeta =
                     { simpleColumnMeta schemaKey.Entity with
                         IsInner = false
                         Path = arrowPath
-                        PathEntities = boundPath
-                    }
+                        PathEntities = boundPath }
+
                 let plainRef = relaxFieldRef schemaKey
                 let schemaRefExpr = makeSingleFieldExpr layout boundMeta plainRef
                 let schemaArgExpr = resolvedRefFieldExpr <| VRArgument schemaArg
-                let schemaCheck = FEBinaryOp (schemaRefExpr, BOEq, schemaArgExpr)
+                let schemaCheck = FEBinaryOp(schemaRefExpr, BOEq, schemaArgExpr)
 
                 (arguments, argumentValues, Some schemaCheck)
 
         let deletedRef = relaxEntityRef entityRef
+
         let deletedCheck =
             match maybeIdsTableRef with
             | None -> None
             | Some idsTableRef ->
                 let idsEntityRef = decompileTableRef idsTableRef
-                let sourceIdExpr = resolvedRefFieldExpr <| VRColumn { Entity = Some idsEntityRef; Name = funId } : ResolvedFieldExpr
+
+                let sourceIdExpr =
+                    resolvedRefFieldExpr
+                    <| VRColumn
+                        { Entity = Some idsEntityRef
+                          Name = funId }
+                    : ResolvedFieldExpr
+
                 let singleSelect =
                     { emptySingleSelectExpr with
-                        Results = [|QRExpr <| queryColumnResult sourceIdExpr|]
-                        From = Some <| FEntity (fromEntity idsEntityRef)
-                    }
+                        Results = [| QRExpr <| queryColumnResult sourceIdExpr |]
+                        From = Some <| FEntity(fromEntity idsEntityRef) }
+
                 let select = selectExpr (SSelect singleSelect)
-                let deletedIdExpr = resolvedRefFieldExpr <| VRColumn { Entity = Some deletedRef; Name = funId } : ResolvedFieldExpr
-                Some <| FENotInQuery (deletedIdExpr, select)
+
+                let deletedIdExpr =
+                    resolvedRefFieldExpr
+                    <| VRColumn
+                        { Entity = Some deletedRef
+                          Name = funId }
+                    : ResolvedFieldExpr
+
+                Some <| FENotInQuery(deletedIdExpr, select)
 
         let delete =
-            { deleteExpr { fromEntity deletedRef with Only = true } with
-                Where = Option.unionWith (curry FEAnd) schemaCheck deletedCheck
-            }
+            { deleteExpr
+                  { fromEntity deletedRef with
+                      Only = true } with
+                Where = Option.unionWith (curry FEAnd) schemaCheck deletedCheck }
+
         let (selectInfo, compiled) = compileDataExpr layout arguments (DEDelete delete)
 
         let! _ = connection.Connection.Query.ExecuteNonQuery (string compiled) argumentValues cancellationToken
@@ -936,104 +1187,148 @@ let private deleteNonRestoredRows
 // 1. In forward order, Load restored data and match with existing records. Then insert new rows and update existing ones;
 // 2. In reverse order, remove all rows which haven't been matched.
 let private restoreOneCustomEntity
-        (layout : Layout)
-        (connection : DatabaseTransaction)
-        (entityRef : ResolvedEntityRef)
-        (key : PreparedSaveRestoreKey)
-        (schemaId : int)
-        (rows : JsonMap seq)
-        (cancellationToken : CancellationToken) : Task<unit -> Task> =
+    (layout: Layout)
+    (connection: DatabaseTransaction)
+    (entityRef: ResolvedEntityRef)
+    (key: PreparedSaveRestoreKey)
+    (schemaId: int)
+    (rows: JsonMap seq)
+    (cancellationToken: CancellationToken)
+    : Task<unit -> Task> =
     task {
         if Seq.isEmpty rows then
             return fun () -> deleteNonRestoredRows layout connection entityRef key schemaId None cancellationToken
         else
-            let! (dataTableRef, availableColumns) = loadRestoredRows layout connection entityRef key schemaId rows cancellationToken
-            let! idsTableRef = updateRestoredRows layout connection entityRef availableColumns dataTableRef cancellationToken
-            do! insertRestoredRows layout connection entityRef key availableColumns dataTableRef idsTableRef cancellationToken
-            return fun () -> deleteNonRestoredRows layout connection entityRef key schemaId (Some idsTableRef) cancellationToken
+            let! (dataTableRef, availableColumns) =
+                loadRestoredRows layout connection entityRef key schemaId rows cancellationToken
+
+            let! idsTableRef =
+                updateRestoredRows layout connection entityRef availableColumns dataTableRef cancellationToken
+
+            do!
+                insertRestoredRows
+                    layout
+                    connection
+                    entityRef
+                    key
+                    availableColumns
+                    dataTableRef
+                    idsTableRef
+                    cancellationToken
+
+            return
+                fun () ->
+                    deleteNonRestoredRows layout connection entityRef key schemaId (Some idsTableRef) cancellationToken
     }
 
 let private restoreCustomEntity
-        (layout : Layout)
-        (connection : DatabaseTransaction)
-        (entityRef : ResolvedEntityRef)
-        (schemaId : int)
-        (schemaName : SchemaName)
-        (maybeRows : JsonMap[] option)
-        (cancellationToken : CancellationToken) : Task<(unit -> Task) seq> =
+    (layout: Layout)
+    (connection: DatabaseTransaction)
+    (entityRef: ResolvedEntityRef)
+    (schemaId: int)
+    (schemaName: SchemaName)
+    (maybeRows: JsonMap[] option)
+    (cancellationToken: CancellationToken)
+    : Task<(unit -> Task) seq> =
     let key = prepareSaveRestoreKey layout entityRef
 
     if Option.isNone key.SchemaNamePath && Option.isNone maybeRows then
         Task.result Seq.empty
     else
         if Option.isNone key.SchemaNamePath && schemaName <> entityRef.Schema then
-            raisef RestoreSchemaException "Custom entities that don't reference schemas can only exist in the same schema"
+            raisef
+                RestoreSchemaException
+                "Custom entities that don't reference schemas can only exist in the same schema"
+
         let rows = Option.defaultValue [||] maybeRows
-        let getSubEntity (row : JsonMap) =
+
+        let getSubEntity (row: JsonMap) =
             match row.TryGetValue(subEntityKey) with
             | (false, _) -> entityRef
             | (true, subEntityToken) ->
                 try
                     subEntityToken.ToObject<ResolvedEntityRef>()
-                with
-                | :? JsonException as e -> raisefUserWithInner RestoreSchemaException e "Failed to parse subentity"
+                with :? JsonException as e ->
+                    raisefUserWithInner RestoreSchemaException e "Failed to parse subentity"
 
         let mutable leftoverRows = rows |> Seq.map (fun row -> (getSubEntity row, row))
-        let getOne (childRef, entity : ResolvedEntity) =
+
+        let getOne (childRef, entity: ResolvedEntity) =
             task {
                 if entity.IsAbstract then
                     return Seq.empty
                 else
-                    let (currRows, newLeftoverRows) = Seq.partition (fun (rowRef, row) -> rowRef = childRef) leftoverRows
+                    let (currRows, newLeftoverRows) =
+                        Seq.partition (fun (rowRef, row) -> rowRef = childRef) leftoverRows
+
                     leftoverRows <- newLeftoverRows
                     let restoredRows = Seq.map snd currRows
-                    let! deleteTask = restoreOneCustomEntity layout connection entityRef key schemaId restoredRows cancellationToken
+
+                    let! deleteTask =
+                        restoreOneCustomEntity layout connection entityRef key schemaId restoredRows cancellationToken
+
                     return Seq.singleton deleteTask
             }
 
         let parent = layout.FindEntity entityRef |> Option.get
+
         let restoredEntities =
             seq {
                 yield (entityRef, parent)
+
                 for KeyValue(childRef, child) in parent.Children do
                     let childEntity = layout.FindEntity childRef |> Option.get
                     yield (childRef, childEntity)
             }
+
         restoredEntities |> Seq.collectTask getOne
 
 type SchemaCustomEntities = Map<SchemaName, CustomEntitiesMap>
 
 let restoreCustomEntities
-        (layout : Layout)
-        (connection : DatabaseTransaction)
-        (allEntitiesMap : SchemaCustomEntities)
-        (cancellationToken : CancellationToken) : Task =
+    (layout: Layout)
+    (connection: DatabaseTransaction)
+    (allEntitiesMap: SchemaCustomEntities)
+    (cancellationToken: CancellationToken)
+    : Task =
     unitTask {
         let restoredSchemas = allEntitiesMap |> Map.keys |> Seq.map string |> Seq.toArray
+
         let! schemaIds =
             (query {
                 for schema in connection.System.Schemas do
                     where (restoredSchemas.Contains(schema.Name))
-            }).ToDictionaryAsync((fun schema -> OzmaQLName schema.Name), (fun schema -> schema.Id))
+            })
+                .ToDictionaryAsync((fun schema -> OzmaQLName schema.Name), (fun schema -> schema.Id))
 
         for KeyValue(srcSchemaName, schemasMap) in allEntitiesMap do
             for KeyValue(schemaName, entitiesMap) in schemasMap do
                 for KeyValue(entityName, rows) in entitiesMap do
-                    let entityRef = { Schema = schemaName; Name = entityName }
+                    let entityRef =
+                        { Schema = schemaName
+                          Name = entityName }
+
                     match layout.FindEntity entityRef with
                     | None ->
                         raisef RestoreSchemaException "In schema %O: entity %O does not exist" schemaName entityRef
                     | Some entity when Option.isNone entity.SaveRestoreKey ->
-                        raisef RestoreSchemaException "In schema %O: entity %O is not save-restorable" schemaName entityRef
+                        raisef
+                            RestoreSchemaException
+                            "In schema %O: entity %O is not save-restorable"
+                            schemaName
+                            entityRef
                     | _ -> ()
 
-        let insertAndUpdateSchema (entityRef : ResolvedEntityRef) (srcSchemaName, rowsMap : CustomEntitiesMap) =
+        let insertAndUpdateSchema (entityRef: ResolvedEntityRef) (srcSchemaName, rowsMap: CustomEntitiesMap) =
             let schemaId = schemaIds.[srcSchemaName]
-            let maybeRows = Map.tryFind entityRef.Schema rowsMap |> Option.bind (Map.tryFind entityRef.Name)
+
+            let maybeRows =
+                Map.tryFind entityRef.Schema rowsMap |> Option.bind (Map.tryFind entityRef.Name)
+
             try
                 restoreCustomEntity layout connection entityRef schemaId srcSchemaName maybeRows cancellationToken
-            with
-            | :? RestoreSchemaException as e -> raisefUserWithInner RestoreSchemaException e "In schema %O" srcSchemaName
+            with :? RestoreSchemaException as e ->
+                raisefUserWithInner RestoreSchemaException e "In schema %O" srcSchemaName
 
         let insertAndUpdate entityRef =
             allEntitiesMap |> Map.toSeq |> Seq.collectTask (insertAndUpdateSchema entityRef)
@@ -1046,10 +1341,17 @@ let restoreCustomEntities
         do! deleteActions |> Seq.rev |> Seq.iterTask (fun action -> action ())
     }
 
-let saveSchema (conn : DatabaseTransaction) (layout : Layout) (schemaName : SchemaName) (cancellationToken : CancellationToken) : Task<SchemaDump> =
+let saveSchema
+    (conn: DatabaseTransaction)
+    (layout: Layout)
+    (schemaName: SchemaName)
+    (cancellationToken: CancellationToken)
+    : Task<SchemaDump> =
     task {
         let! schema = getSchemaByName conn schemaName cancellationToken
-        let schemaCheck = Expr.toExpressionFunc <@ fun (someSchema : Schema) -> someSchema.Id = schema.Id @>
+
+        let schemaCheck =
+            Expr.toExpressionFunc <@ fun (someSchema: Schema) -> someSchema.Id = schema.Id @>
 
         let! entitiesData = buildSchemaLayout conn.System (Some schemaCheck) cancellationToken
         let! rolesData = buildSchemaPermissions conn.System (Some schemaCheck) cancellationToken
@@ -1064,6 +1366,7 @@ let saveSchema (conn : DatabaseTransaction) (layout : Layout) (schemaName : Sche
             match Map.tryFind schemaName m with
             | None -> failwithf "Schema %O not found" schemaName
             | Some v -> v
+
         let entities = findOrFail entitiesData.Schemas
         let roles = findOrFail rolesData.Schemas
         let userViews = findOrFail userViewsData.Schemas
@@ -1071,10 +1374,15 @@ let saveSchema (conn : DatabaseTransaction) (layout : Layout) (schemaName : Sche
         let modules = findOrFail modulesMeta.Schemas
         let actions = findOrFail actionsMeta.Schemas
         let triggers = findOrFail triggersData.Schemas
+
         return
             { Entities = entities.Entities
               Roles = roles.Roles
-              UserViews = if Option.isSome userViews.GeneratorScript then Map.empty else userViews.UserViews
+              UserViews =
+                if Option.isSome userViews.GeneratorScript then
+                    Map.empty
+                else
+                    userViews.UserViews
               UserViewsGeneratorScript = userViews.GeneratorScript
               DefaultAttributes = attributes.Schemas
               Modules = modules.Modules
@@ -1082,60 +1390,86 @@ let saveSchema (conn : DatabaseTransaction) (layout : Layout) (schemaName : Sche
               Triggers = triggers.Schemas
               CustomEntities = customEntitiesData
               Description = schema.Description
-              Metadata = JsonMap.parse schema.Metadata
-            }
+              Metadata = JsonMap.parse schema.Metadata }
     }
 
-let restoreSchemas (conn : DatabaseTransaction) (oldLayout : Layout) (dumps : Map<SchemaName, SchemaDump>) (cancellationToken : CancellationToken) : Task<bool> =
+let restoreSchemas
+    (conn: DatabaseTransaction)
+    (oldLayout: Layout)
+    (dumps: Map<SchemaName, SchemaDump>)
+    (cancellationToken: CancellationToken)
+    : Task<bool> =
     task {
-        let makeSchema name (dump : SchemaDump) : SourceSchema =
+        let makeSchema name (dump: SchemaDump) : SourceSchema =
             { Entities = dump.Entities
               Description = dump.Description
-              Metadata = dump.Metadata
-            }
-        let newLayout = { Schemas = Map.map makeSchema dumps } : SourceLayout
-        let newPerms = { Schemas = dumps |> Map.map (fun name dump -> { Roles = dump.Roles }) } : SourcePermissions
-        let makeUserView name (dump : SchemaDump) =
-            { UserViews = if Option.isSome dump.UserViewsGeneratorScript then Map.empty else dump.UserViews
-              GeneratorScript = dump.UserViewsGeneratorScript
-            }
-        let newUserViews = { Schemas = Map.map makeUserView dumps } : SourceUserViews
-        let newAttributes = { Schemas = dumps |> Map.map (fun name dump -> { Schemas = dump.DefaultAttributes }) } : SourceDefaultAttributes
-        let newModules = { Schemas = dumps |> Map.map (fun name dump -> { Modules = dump.Modules }) } : SourceModules
-        let newActions = { Schemas = dumps |> Map.map (fun name dump -> { Actions = dump.Actions }) } : SourceActions
-        let newTriggers = { Schemas = dumps |> Map.map (fun name dump -> { Schemas = dump.Triggers }) } : SourceTriggers
+              Metadata = dump.Metadata }
+
+        let newLayout = { Schemas = Map.map makeSchema dumps }: SourceLayout
+
+        let newPerms =
+            { Schemas = dumps |> Map.map (fun name dump -> { Roles = dump.Roles }) }: SourcePermissions
+
+        let makeUserView name (dump: SchemaDump) =
+            { UserViews =
+                if Option.isSome dump.UserViewsGeneratorScript then
+                    Map.empty
+                else
+                    dump.UserViews
+              GeneratorScript = dump.UserViewsGeneratorScript }
+
+        let newUserViews = { Schemas = Map.map makeUserView dumps }: SourceUserViews
+
+        let newAttributes =
+            { Schemas = dumps |> Map.map (fun name dump -> { Schemas = dump.DefaultAttributes }) }
+            : SourceDefaultAttributes
+
+        let newModules =
+            { Schemas = dumps |> Map.map (fun name dump -> { Modules = dump.Modules }) }: SourceModules
+
+        let newActions =
+            { Schemas = dumps |> Map.map (fun name dump -> { Actions = dump.Actions }) }: SourceActions
+
+        let newTriggers =
+            { Schemas = dumps |> Map.map (fun name dump -> { Schemas = dump.Triggers }) }: SourceTriggers
 
         let! layoutUpdate = updateLayout conn.System newLayout cancellationToken
+
         let! permissionsUpdate =
             try
                 updatePermissions conn.System newPerms cancellationToken
-            with
-            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore permissions"
+            with :? SystemUpdaterException as e ->
+                raisefUserWithInner RestoreSchemaException e "Failed to restore permissions"
+
         let! userViewsUpdate =
             try
                 updateUserViews conn.System newUserViews cancellationToken
-            with
-            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore user views"
+            with :? SystemUpdaterException as e ->
+                raisefUserWithInner RestoreSchemaException e "Failed to restore user views"
+
         let! attributesUpdate =
             try
                 updateAttributes conn.System newAttributes cancellationToken
-            with
-            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore attributes"
+            with :? SystemUpdaterException as e ->
+                raisefUserWithInner RestoreSchemaException e "Failed to restore attributes"
+
         let! modulesUpdate =
             try
                 updateModules conn.System newModules cancellationToken
-            with
-            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore modules"
+            with :? SystemUpdaterException as e ->
+                raisefUserWithInner RestoreSchemaException e "Failed to restore modules"
+
         let! actionsUpdate =
             try
                 updateActions conn.System newActions cancellationToken
-            with
-            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore actions"
+            with :? SystemUpdaterException as e ->
+                raisefUserWithInner RestoreSchemaException e "Failed to restore actions"
+
         let! triggersUpdate =
             try
                 updateTriggers conn.System newTriggers cancellationToken
-            with
-            | :? SystemUpdaterException as e -> raisefUserWithInner RestoreSchemaException e "Failed to restore triggers"
+            with :? SystemUpdaterException as e ->
+                raisefUserWithInner RestoreSchemaException e "Failed to restore triggers"
 
         let fullUpdate =
             seq {
@@ -1146,7 +1480,8 @@ let restoreSchemas (conn : DatabaseTransaction) (oldLayout : Layout) (dumps : Ma
                 actionsUpdate
                 triggersUpdate
                 modulesUpdate
-            } |> Seq.fold1 unionUpdateResult
+            }
+            |> Seq.fold1 unionUpdateResult
 
         do! deleteDeferredFromUpdate oldLayout conn fullUpdate cancellationToken
         // Clear EF Core objects from cache, so they will be fetched anew.
@@ -1155,69 +1490,73 @@ let restoreSchemas (conn : DatabaseTransaction) (oldLayout : Layout) (dumps : Ma
         return not <| updateResultIsEmpty fullUpdate
     }
 
-let private prettifyTriggerMeta (trigger : SourceTrigger) : PrettyTriggerMeta =
+let private prettifyTriggerMeta (trigger: SourceTrigger) : PrettyTriggerMeta =
     { AllowBroken = trigger.AllowBroken
       Priority = trigger.Priority
       Time = trigger.Time
       OnInsert = trigger.OnInsert
       OnUpdateFields = trigger.OnUpdateFields
-      OnDelete = trigger.OnDelete
-    }
+      OnDelete = trigger.OnDelete }
 
-let private deprettifyTrigger (meta : PrettyTriggerMeta) (procedure : string) : SourceTrigger =
+let private deprettifyTrigger (meta: PrettyTriggerMeta) (procedure: string) : SourceTrigger =
     { AllowBroken = meta.AllowBroken
       Priority = meta.Priority
       Time = meta.Time
       OnInsert = meta.OnInsert
       OnUpdateFields = meta.OnUpdateFields
       OnDelete = meta.OnDelete
-      Procedure = procedure
-    }
+      Procedure = procedure }
 
-let private prettifyColumnField (defaultAttrs : SourceAttributesField option) (field : SourceColumnField) : PrettyColumnField =
+let private prettifyColumnField
+    (defaultAttrs: SourceAttributesField option)
+    (field: SourceColumnField)
+    : PrettyColumnField =
     { Type = field.Type
       DefaultValue = field.DefaultValue
       IsNullable = field.IsNullable
       IsImmutable = field.IsImmutable
       DefaultAttributes = defaultAttrs
       Description = field.Description
-      Metadata = field.Metadata
-    }
+      Metadata = field.Metadata }
 
-let private deprettifyColumnField (field : PrettyColumnField) : SourceAttributesField option * SourceColumnField =
+let private deprettifyColumnField (field: PrettyColumnField) : SourceAttributesField option * SourceColumnField =
     let ret =
         { Type = field.Type
           DefaultValue = field.DefaultValue
           IsNullable = field.IsNullable
           IsImmutable = field.IsImmutable
           Description = field.Description
-          Metadata = field.Metadata
-        }
+          Metadata = field.Metadata }
+
     (field.DefaultAttributes, ret)
 
-let private prettifyComputedField (defaultAttrs : SourceAttributesField option) (field : SourceComputedField) : PrettyComputedField =
+let private prettifyComputedField
+    (defaultAttrs: SourceAttributesField option)
+    (field: SourceComputedField)
+    : PrettyComputedField =
     { Expression = field.Expression
       AllowBroken = field.AllowBroken
       IsVirtual = field.IsVirtual
       IsMaterialized = field.IsMaterialized
       DefaultAttributes = defaultAttrs
       Description = field.Description
-      Metadata = field.Metadata
-    }
+      Metadata = field.Metadata }
 
-let private deprettifyComputedField (field : PrettyComputedField) : SourceAttributesField option * SourceComputedField =
+let private deprettifyComputedField (field: PrettyComputedField) : SourceAttributesField option * SourceComputedField =
     let ret =
         { Expression = field.Expression
           AllowBroken = field.AllowBroken
           IsVirtual = field.IsVirtual
           IsMaterialized = field.IsMaterialized
           Description = field.Description
-          Metadata = field.Metadata
-        } : SourceComputedField
+          Metadata = field.Metadata }
+        : SourceComputedField
+
     (field.DefaultAttributes, ret)
 
-let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : SourceEntity) : PrettyEntity =
+let private prettifyEntity (defaultAttrs: SourceAttributesEntity) (entity: SourceEntity) : PrettyEntity =
     let applyAttrs fn name = fn (defaultAttrs.FindField name)
+
     { ColumnFields = Map.map (applyAttrs prettifyColumnField) entity.ColumnFields
       ComputedFields = Map.map (applyAttrs prettifyComputedField) entity.ComputedFields
       UniqueConstraints = entity.UniqueConstraints
@@ -1228,20 +1567,26 @@ let private prettifyEntity (defaultAttrs : SourceAttributesEntity) (entity : Sou
       IsAbstract = entity.IsAbstract
       IsFrozen = entity.IsFrozen
       Parent = entity.Parent
-      SystemDefaultAttributes = defaultAttrs.Fields |> Map.filter (fun name attrs -> Set.contains name systemColumns)
+      SystemDefaultAttributes =
+        defaultAttrs.Fields
+        |> Map.filter (fun name attrs -> Set.contains name systemColumns)
       Description = entity.Description
-      Metadata = entity.Metadata
-    }
+      Metadata = entity.Metadata }
 
-let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity option * SourceEntity =
-    if not <| Set.isEmpty (Set.difference (Map.keysSet entity.SystemDefaultAttributes) systemColumns) then
+let private deprettifyEntity (entity: PrettyEntity) : SourceAttributesEntity option * SourceEntity =
+    if
+        not
+        <| Set.isEmpty (Set.difference (Map.keysSet entity.SystemDefaultAttributes) systemColumns)
+    then
         raisef RestoreSchemaException "`systemDefaultAttributes` can contain only attributes for system columns"
+
     let mutable defaultAttrs = entity.SystemDefaultAttributes
+
     let extractAttrs name (maybeFieldAttrs, entry) =
         match maybeFieldAttrs with
-        | Some fieldAttrs ->
-            defaultAttrs <- Map.add name fieldAttrs defaultAttrs
+        | Some fieldAttrs -> defaultAttrs <- Map.add name fieldAttrs defaultAttrs
         | None -> ()
+
         entry
 
     let ret =
@@ -1261,9 +1606,14 @@ let private deprettifyEntity (entity : PrettyEntity) : SourceAttributesEntity op
           IsFrozen = entity.IsFrozen
           Parent = entity.Parent
           Description = entity.Description
-          Metadata = entity.Metadata
-        }
-    let attrsRet = if Map.isEmpty defaultAttrs then None else Some { Fields = defaultAttrs }
+          Metadata = entity.Metadata }
+
+    let attrsRet =
+        if Map.isEmpty defaultAttrs then
+            None
+        else
+            Some { Fields = defaultAttrs }
+
     (attrsRet, ret)
 
 let private settingsEntry = "schema.yaml"
@@ -1275,36 +1625,41 @@ let private userViewsGeneratorEntry = "user_views_generator.mjs"
 
 let private maxSaveRestoreSize = 32L * 1024L * 1024L // 32MB
 
-let myYamlSerializer = makeYamlSerializer { defaultYamlSerializerSettings with NamingConvention = CamelCaseNamingConvention.Instance }
+let myYamlSerializer =
+    makeYamlSerializer
+        { defaultYamlSerializerSettings with
+            NamingConvention = CamelCaseNamingConvention.Instance }
 
-let myYamlDeserializer = makeYamlDeserializer { defaultYamlDeserializerSettings with NamingConvention = CamelCaseNamingConvention.Instance }
+let myYamlDeserializer =
+    makeYamlDeserializer
+        { defaultYamlDeserializerSettings with
+            NamingConvention = CamelCaseNamingConvention.Instance }
 
-type [<SerializeAsObject("type"); NoEquality; NoComparison>] SavedSchemaData =
-    | [<CaseKey("customEntities")>] SSCustomEntities of CustomEntities : CustomEntitiesMap
-    | [<CaseKey("full", Type=CaseSerialization.InnerObject); DefaultCase>] SSFull of Schema : SchemaDump
+[<SerializeAsObject("type"); NoEquality; NoComparison>]
+type SavedSchemaData =
+    | [<CaseKey("customEntities")>] SSCustomEntities of CustomEntities: CustomEntitiesMap
+    | [<CaseKey("full", Type = CaseSerialization.InnerObject); DefaultCase>] SSFull of Schema: SchemaDump
 
 type PrettySchemaSettings =
     { [<DataMember(EmitDefaultValue = false)>]
-      OnlyCustomEntities : bool
+      OnlyCustomEntities: bool
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
-let emptyPrettySchemaSettings : PrettySchemaSettings =
+let emptyPrettySchemaSettings: PrettySchemaSettings =
     { OnlyCustomEntities = false
       Description = ""
-      Metadata = JsonMap.empty
-    }
+      Metadata = JsonMap.empty }
 
 // This should be called only with a `MemoryStream` or a compatible stream,
 // as `ZipArchive` is synchronous!
-let schemasToZipFile (schemas : Map<SchemaName, SavedSchemaData>) (stream : Stream) =
+let schemasToZipFile (schemas: Map<SchemaName, SavedSchemaData>) (stream: Stream) =
     use zip = new ZipArchive(stream, ZipArchiveMode.Create, true)
     let mutable totalSize = 0L
 
     for KeyValue(schemaName, data) in schemas do
-        let useEntry (path : string) (fn : StreamWriter -> unit) =
+        let useEntry (path: string) (fn: StreamWriter -> unit) =
             let entry = zip.CreateEntry(sprintf "%O/%s" schemaName path)
             // https://superuser.com/questions/603068/unzipping-file-whilst-getting-correct-permissions
             entry.ExternalAttributes <- 0o644 <<< 16
@@ -1312,24 +1667,33 @@ let schemasToZipFile (schemas : Map<SchemaName, SavedSchemaData>) (stream : Stre
             fn writer
             totalSize <- totalSize + writer.BaseStream.Position
 
-        let dumpToEntry (path : string) (document : 'a) =
-            useEntry path <| fun writer ->
-                myYamlSerializer.Serialize(writer, document :> obj)
+        let dumpToEntry (path: string) (document: 'a) =
+            useEntry path
+            <| fun writer -> myYamlSerializer.Serialize(writer, document :> obj)
 
         let (dump, onlyCustomEntities) =
             match data with
-            | SSCustomEntities entities -> ({ emptySchemaDump with CustomEntities = entities }, true)
+            | SSCustomEntities entities ->
+                ({ emptySchemaDump with
+                    CustomEntities = entities },
+                 true)
             | SSFull dump -> (dump, false)
 
         let settings =
             { OnlyCustomEntities = onlyCustomEntities
               Description = dump.Description
-              Metadata = dump.Metadata
-            } : PrettySchemaSettings
+              Metadata = dump.Metadata }
+            : PrettySchemaSettings
+
         dumpToEntry "schema.yaml" settings
 
         for KeyValue(name, entity) in dump.Entities do
-            let defaultAttrs = dump.DefaultAttributes |> Map.tryFind schemaName |> Option.bind (fun schema -> Map.tryFind name schema.Entities) |> Option.defaultValue emptySourceAttributesEntity
+            let defaultAttrs =
+                dump.DefaultAttributes
+                |> Map.tryFind schemaName
+                |> Option.bind (fun schema -> Map.tryFind name schema.Entities)
+                |> Option.defaultValue emptySourceAttributesEntity
+
             let prettyEntity = prettifyEntity defaultAttrs entity
             dumpToEntry (sprintf "entities/%O.yaml" name) prettyEntity
 
@@ -1337,25 +1701,32 @@ let schemasToZipFile (schemas : Map<SchemaName, SavedSchemaData>) (stream : Stre
             dumpToEntry (sprintf "roles/%O.yaml" name) role
 
         for KeyValue(name, uv) in dump.UserViews do
-            useEntry (sprintf "user_views/%O.funql" name) <| fun writer -> writer.Write(uv.Query)
+            useEntry (sprintf "user_views/%O.funql" name)
+            <| fun writer -> writer.Write(uv.Query)
+
             if uv.AllowBroken then
-                let uvMeta = { AllowBroken = true } : PrettyUserViewMeta
+                let uvMeta = { AllowBroken = true }: PrettyUserViewMeta
                 dumpToEntry (sprintf "user_views/%O.yaml" name) uvMeta
 
         for KeyValue(modulePath, modul) in dump.Modules do
             if not <| modulePath.EndsWith(".mjs") then
                 failwithf "Unexpected module path in %O: %s" schemaName modulePath
-            useEntry (sprintf "modules/%s" modulePath) <| fun writer -> writer.Write(modul.Source)
+
+            useEntry (sprintf "modules/%s" modulePath)
+            <| fun writer -> writer.Write(modul.Source)
+
             if modul.AllowBroken then
                 // Module name should always end in .mjs, and we exploit it here.
-                let moduleMeta = { AllowBroken = true } : PrettyModuleMeta
+                let moduleMeta = { AllowBroken = true }: PrettyModuleMeta
                 let barePath = String.removeSuffix ".mjs" modulePath
                 dumpToEntry (sprintf "modules/%O.yaml" barePath) moduleMeta
 
         for KeyValue(actionName, action) in dump.Actions do
-            useEntry (sprintf "actions/%O.mjs" actionName) <| fun writer -> writer.Write(action.Function)
+            useEntry (sprintf "actions/%O.mjs" actionName)
+            <| fun writer -> writer.Write(action.Function)
+
             if action.AllowBroken then
-                let actionMeta = { AllowBroken = true } : PrettyActionMeta
+                let actionMeta = { AllowBroken = true }: PrettyActionMeta
                 dumpToEntry (sprintf "actions/%O.yaml" actionName) actionMeta
 
         for KeyValue(schemaName, schemaTriggers) in dump.Triggers do
@@ -1363,10 +1734,13 @@ let schemasToZipFile (schemas : Map<SchemaName, SavedSchemaData>) (stream : Stre
                 for KeyValue(triggerName, trigger) in entityTriggers.Triggers do
                     let prettyMeta = prettifyTriggerMeta trigger
                     dumpToEntry (sprintf "triggers/%O/%O/%O.yaml" schemaName entityName triggerName) prettyMeta
-                    useEntry (sprintf "triggers/%O/%O/%O.mjs" schemaName entityName triggerName) <| fun writer ->
-                        writer.Write(trigger.Procedure)
 
-        let extraAttributes = dump.DefaultAttributes |> Map.filter (fun name schema -> name <> schemaName)
+                    useEntry (sprintf "triggers/%O/%O/%O.mjs" schemaName entityName triggerName)
+                    <| fun writer -> writer.Write(trigger.Procedure)
+
+        let extraAttributes =
+            dump.DefaultAttributes |> Map.filter (fun name schema -> name <> schemaName)
+
         if not <| Map.isEmpty extraAttributes then
             dumpToEntry extraDefaultAttributesEntry extraAttributes
 
@@ -1374,57 +1748,82 @@ let schemasToZipFile (schemas : Map<SchemaName, SavedSchemaData>) (stream : Stre
         | None -> ()
         | Some script ->
             useEntry userViewsGeneratorEntry <| fun writer -> writer.Write(script)
+
             if script.AllowBroken then
-                let genMeta = { AllowBroken = true } : PrettyUserViewsGeneratorScriptMeta
+                let genMeta = { AllowBroken = true }: PrettyUserViewsGeneratorScriptMeta
                 dumpToEntry userViewsGeneratorMetaEntry genMeta
 
         for KeyValue(schemaName, schemaEntries) in dump.CustomEntities do
-                for KeyValue(entityName, entityEntries) in schemaEntries do
-                    if not <| Array.isEmpty entityEntries then
-                        dumpToEntry (sprintf "custom/%O/%O.yaml" schemaName entityName) entityEntries
+            for KeyValue(entityName, entityEntries) in schemaEntries do
+                if not <| Array.isEmpty entityEntries then
+                    dumpToEntry (sprintf "custom/%O/%O.yaml" schemaName entityName) entityEntries
 
     if totalSize > maxSaveRestoreSize then
         failwithf "Total files size in archive is %i, which is too large" totalSize
 
 // This should be called only with a `MemoryStream` or a compatible stream,
 // as `ZipArchive` is synchronous!
-let schemasFromZipFile (stream : Stream) : Map<SchemaName, SavedSchemaData> =
+let schemasFromZipFile (stream: Stream) : Map<SchemaName, SavedSchemaData> =
 
     use zip = new ZipArchive(stream, ZipArchiveMode.Read)
     let mutable leftSize = maxSaveRestoreSize
 
-    let readEntry (entry : ZipArchiveEntry) (fn : StreamReader -> 'a) : 'a =
+    let readEntry (entry: ZipArchiveEntry) (fn: StreamReader -> 'a) : 'a =
         if leftSize - entry.Length < 0L then
-            raisef RestoreSchemaException "Archive entry %s length is %i, which exceeds allowed max length of %i bytes" entry.FullName entry.Length leftSize
+            raisef
+                RestoreSchemaException
+                "Archive entry %s length is %i, which exceeds allowed max length of %i bytes"
+                entry.FullName
+                entry.Length
+                leftSize
+
         let stream = new MaxLengthStream(entry.Open(), leftSize)
         use reader = new StreamReader(stream)
+
         let ret =
             try
                 fn reader
-            with
-            | :? IOException as e -> raisefUserWithInner RestoreSchemaException e "Error during reading archive entry %s" entry.FullName
+            with :? IOException as e ->
+                raisefUserWithInner RestoreSchemaException e "Error during reading archive entry %s" entry.FullName
+
         leftSize <- leftSize - stream.BytesRead
         ret
 
-    let deserializeEntry (entry : ZipArchiveEntry) : 'a = readEntry entry <| fun reader ->
-        try
-            downcast myYamlDeserializer.Deserialize(reader, typeof<'a>)
-        with
-        | :? JsonSerializationException as e -> raisefUserWithInner RestoreSchemaException e "Error during deserializing archive entry %s" entry.FullName
+    let deserializeEntry (entry: ZipArchiveEntry) : 'a =
+        readEntry entry
+        <| fun reader ->
+            try
+                downcast myYamlDeserializer.Deserialize(reader, typeof<'a>)
+            with :? JsonSerializationException as e ->
+                raisefUserWithInner
+                    RestoreSchemaException
+                    e
+                    "Error during deserializing archive entry %s"
+                    entry.FullName
 
-    let mutable encounteredSettings : Map<SchemaName, PrettySchemaSettings> = Map.empty
-    let mutable encounteredActions : Map<ActionRef, PrettyActionMeta * string> = Map.empty
-    let mutable encounteredModules : Map<ModuleRef, PrettyModuleMeta * string> = Map.empty
-    let mutable encounteredTriggers : Map<TriggerRef, PrettyTriggerMeta option * string> = Map.empty
-    let mutable encounteredUserViews : Map<ResolvedUserViewRef, PrettyUserViewMeta * string> = Map.empty
-    let mutable encounteredUserViewGeneratorScripts : Map<SchemaName, PrettyUserViewsGeneratorScriptMeta * string> = Map.empty
+    let mutable encounteredSettings: Map<SchemaName, PrettySchemaSettings> = Map.empty
 
-    let parseZipEntry (entry : ZipArchiveEntry) : SchemaName * SchemaDump =
+    let mutable encounteredActions: Map<ActionRef, PrettyActionMeta * string> =
+        Map.empty
+
+    let mutable encounteredModules: Map<ModuleRef, PrettyModuleMeta * string> =
+        Map.empty
+
+    let mutable encounteredTriggers: Map<TriggerRef, PrettyTriggerMeta option * string> =
+        Map.empty
+
+    let mutable encounteredUserViews: Map<ResolvedUserViewRef, PrettyUserViewMeta * string> =
+        Map.empty
+
+    let mutable encounteredUserViewGeneratorScripts: Map<SchemaName, PrettyUserViewsGeneratorScriptMeta * string> =
+        Map.empty
+
+    let parseZipEntry (entry: ZipArchiveEntry) : SchemaName * SchemaDump =
         let (schemaName, rawPath) =
             match entry.FullName with
-            | CIRegex @"^([^/]+)/(.*)$" [rawSchemaName; rawPath] ->
-                (OzmaQLName rawSchemaName, rawPath)
+            | CIRegex @"^([^/]+)/(.*)$" [ rawSchemaName; rawPath ] -> (OzmaQLName rawSchemaName, rawPath)
             | fileName -> raisef RestoreSchemaException "Invalid archive entry %s" fileName
+
         let dump =
             if entry.Name = "" && entry.Length = 0L then
                 // Directory
@@ -1432,159 +1831,270 @@ let schemasFromZipFile (stream : Stream) : Map<SchemaName, SavedSchemaData> =
             else
                 match rawPath with
                 | "schema.yaml" ->
-                    let settings : PrettySchemaSettings = deserializeEntry entry
+                    let settings: PrettySchemaSettings = deserializeEntry entry
                     encounteredSettings <- Map.add schemaName settings encounteredSettings
                     emptySchemaDump
-                | CIRegex @"^entities/([^/]+)\.yaml$" [rawName] ->
+                | CIRegex @"^entities/([^/]+)\.yaml$" [ rawName ] ->
                     let name = OzmaQLName rawName
-                    let prettyEntity : PrettyEntity = deserializeEntry entry
+                    let prettyEntity: PrettyEntity = deserializeEntry entry
                     let (maybeEntityAttrs, entity) = deprettifyEntity prettyEntity
+
                     { emptySchemaDump with
-                          Entities = Map.singleton name entity
-                          DefaultAttributes =
-                              match maybeEntityAttrs with
-                              | Some attrs -> Map.singleton schemaName { Entities = Map.singleton name attrs }
-                              | None -> Map.empty
-                    }
-                | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.yaml$" [rawSchemaName; rawEntityName; rawTriggerName] ->
-                    let ref = { Schema = schemaName; Entity = { Schema = OzmaQLName rawSchemaName; Name = OzmaQLName rawEntityName }; Name = OzmaQLName rawTriggerName }
-                    let prettyTriggerMeta : PrettyTriggerMeta = deserializeEntry entry
-                    let (prevMeta, prevProc) = Map.findWithLazyDefault ref (fun () -> (None, "")) encounteredTriggers
+                        Entities = Map.singleton name entity
+                        DefaultAttributes =
+                            match maybeEntityAttrs with
+                            | Some attrs -> Map.singleton schemaName { Entities = Map.singleton name attrs }
+                            | None -> Map.empty }
+                | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.yaml$" [ rawSchemaName; rawEntityName; rawTriggerName ] ->
+                    let ref =
+                        { Schema = schemaName
+                          Entity =
+                            { Schema = OzmaQLName rawSchemaName
+                              Name = OzmaQLName rawEntityName }
+                          Name = OzmaQLName rawTriggerName }
+
+                    let prettyTriggerMeta: PrettyTriggerMeta = deserializeEntry entry
+
+                    let (prevMeta, prevProc) =
+                        Map.findWithLazyDefault ref (fun () -> (None, "")) encounteredTriggers
+
                     assert (Option.isNone prevMeta)
                     encounteredTriggers <- Map.add ref (Some prettyTriggerMeta, prevProc) encounteredTriggers
                     emptySchemaDump
-                | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.mjs$" [rawSchemaName; rawEntityName; rawTriggerName] ->
-                    let ref = { Schema = schemaName; Entity = { Schema = OzmaQLName rawSchemaName; Name = OzmaQLName rawEntityName }; Name = OzmaQLName rawTriggerName }
+                | CIRegex @"^triggers/([^/]+)/([^/]+)/([^/]+)\.mjs$" [ rawSchemaName; rawEntityName; rawTriggerName ] ->
+                    let ref =
+                        { Schema = schemaName
+                          Entity =
+                            { Schema = OzmaQLName rawSchemaName
+                              Name = OzmaQLName rawEntityName }
+                          Name = OzmaQLName rawTriggerName }
+
                     let rawProcedure = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let (prevMeta, prevProc) = Map.findWithLazyDefault ref (fun () -> (None, "")) encounteredTriggers
+
+                    let (prevMeta, prevProc) =
+                        Map.findWithLazyDefault ref (fun () -> (None, "")) encounteredTriggers
+
                     encounteredTriggers <- Map.add ref (prevMeta, rawProcedure) encounteredTriggers
                     emptySchemaDump
-                | CIRegex @"^actions/([^/]+)\.yaml$" [rawActionName] ->
-                    let ref = { Schema = schemaName; Name = OzmaQLName rawActionName }
-                    let prettyActionMeta : PrettyActionMeta = deserializeEntry entry
-                    let (prevMeta, prevFunc) = Map.findWithLazyDefault ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
+                | CIRegex @"^actions/([^/]+)\.yaml$" [ rawActionName ] ->
+                    let ref =
+                        { Schema = schemaName
+                          Name = OzmaQLName rawActionName }
+
+                    let prettyActionMeta: PrettyActionMeta = deserializeEntry entry
+
+                    let (prevMeta, prevFunc) =
+                        Map.findWithLazyDefault ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
+
                     encounteredActions <- Map.add ref (prettyActionMeta, prevFunc) encounteredActions
                     emptySchemaDump
-                | CIRegex @"^actions/([^/]+)\.mjs$" [rawActionName] ->
-                    let ref = { Schema = schemaName; Name = OzmaQLName rawActionName }
+                | CIRegex @"^actions/([^/]+)\.mjs$" [ rawActionName ] ->
+                    let ref =
+                        { Schema = schemaName
+                          Name = OzmaQLName rawActionName }
+
                     let rawFunc = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let (prevMeta, prevFunc) = Map.findWithLazyDefault ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
+
+                    let (prevMeta, prevFunc) =
+                        Map.findWithLazyDefault ref (fun () -> (emptyPrettyActionMeta, "")) encounteredActions
+
                     encounteredActions <- Map.add ref (prevMeta, rawFunc) encounteredActions
                     emptySchemaDump
-                | CIRegex @"^modules/(.*)\.yaml$" [rawModuleName] ->
-                    let ref = { Schema = schemaName; Path = rawModuleName + ".mjs" }
-                    let prettyModuleMeta : PrettyModuleMeta = deserializeEntry entry
-                    let (prevMeta, prevFunc) = Map.findWithLazyDefault ref (fun () -> (emptyModuleActionMeta, "")) encounteredModules
+                | CIRegex @"^modules/(.*)\.yaml$" [ rawModuleName ] ->
+                    let ref =
+                        { Schema = schemaName
+                          Path = rawModuleName + ".mjs" }
+
+                    let prettyModuleMeta: PrettyModuleMeta = deserializeEntry entry
+
+                    let (prevMeta, prevFunc) =
+                        Map.findWithLazyDefault ref (fun () -> (emptyModuleActionMeta, "")) encounteredModules
+
                     encounteredModules <- Map.add ref (prettyModuleMeta, prevFunc) encounteredModules
                     emptySchemaDump
-                | CIRegex @"^modules/(.*\.mjs)$" [rawModuleName] ->
-                    let ref = { Schema = schemaName; Path = rawModuleName }
+                | CIRegex @"^modules/(.*\.mjs)$" [ rawModuleName ] ->
+                    let ref =
+                        { Schema = schemaName
+                          Path = rawModuleName }
+
                     let rawModule = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let (prevMeta, prevFunc) = Map.findWithLazyDefault ref (fun () -> (emptyModuleActionMeta, "")) encounteredModules
+
+                    let (prevMeta, prevFunc) =
+                        Map.findWithLazyDefault ref (fun () -> (emptyModuleActionMeta, "")) encounteredModules
+
                     encounteredModules <- Map.add ref (prevMeta, rawModule) encounteredModules
                     emptySchemaDump
-                | CIRegex @"^roles/([^/]+)\.yaml$" [rawName] ->
+                | CIRegex @"^roles/([^/]+)\.yaml$" [ rawName ] ->
                     let name = OzmaQLName rawName
-                    let role : SourceRole = deserializeEntry entry
+                    let role: SourceRole = deserializeEntry entry
+
                     { emptySchemaDump with
-                        Roles = Map.singleton name role
-                    }
-                | CIRegex @"^user_views/([^/]+)\.yaml$" [rawName] ->
-                    let ref = { Schema = schemaName; Name = OzmaQLName rawName }
-                    let prettyUvMeta : PrettyUserViewMeta = deserializeEntry entry
-                    let (prevMeta, prevUv) = Map.findWithLazyDefault ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
+                        Roles = Map.singleton name role }
+                | CIRegex @"^user_views/([^/]+)\.yaml$" [ rawName ] ->
+                    let ref =
+                        { Schema = schemaName
+                          Name = OzmaQLName rawName }
+
+                    let prettyUvMeta: PrettyUserViewMeta = deserializeEntry entry
+
+                    let (prevMeta, prevUv) =
+                        Map.findWithLazyDefault ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
+
                     encounteredUserViews <- Map.add ref (prettyUvMeta, prevUv) encounteredUserViews
                     emptySchemaDump
-                | CIRegex @"^user_views/([^/]+)\.funql$" [rawName] ->
-                    let ref = { Schema = schemaName; Name = OzmaQLName rawName }
+                | CIRegex @"^user_views/([^/]+)\.funql$" [ rawName ] ->
+                    let ref =
+                        { Schema = schemaName
+                          Name = OzmaQLName rawName }
+
                     let rawUv = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let (prevMeta, prevUv) = Map.findWithLazyDefault ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
+
+                    let (prevMeta, prevUv) =
+                        Map.findWithLazyDefault ref (fun () -> (emptyPrettyUserViewMeta, "")) encounteredUserViews
+
                     encounteredUserViews <- Map.add ref (prevMeta, rawUv) encounteredUserViews
                     emptySchemaDump
-                | CIRegex @"^custom/([^/]+)/([^/]+)\.yaml$" [rawCustomSchemaName; rawCustomName] ->
+                | CIRegex @"^custom/([^/]+)/([^/]+)\.yaml$" [ rawCustomSchemaName; rawCustomName ] ->
                     let entries = deserializeEntry entry
+
                     { emptySchemaDump with
-                        CustomEntities = Map.singleton (OzmaQLName rawCustomSchemaName) (Map.singleton (OzmaQLName rawCustomName) entries)
-                    }
+                        CustomEntities =
+                            Map.singleton
+                                (OzmaQLName rawCustomSchemaName)
+                                (Map.singleton (OzmaQLName rawCustomName) entries) }
                 | fileName when fileName = extraDefaultAttributesEntry ->
-                    let defaultAttrs : Map<SchemaName, SourceAttributesSchema> = deserializeEntry entry
+                    let defaultAttrs: Map<SchemaName, SourceAttributesSchema> = deserializeEntry entry
+
                     { emptySchemaDump with
-                        DefaultAttributes = defaultAttrs
-                    }
+                        DefaultAttributes = defaultAttrs }
                 | fileName when fileName = userViewsGeneratorMetaEntry ->
-                    let prettyGeneratorMeta : PrettyUserViewsGeneratorScriptMeta = deserializeEntry entry
-                    let (prevMeta, prevScript) = Map.findWithLazyDefault schemaName (fun () -> (emptyPrettyUserViewsGeneratorScriptMeta, "")) encounteredUserViewGeneratorScripts
-                    encounteredUserViewGeneratorScripts <- Map.add schemaName (prettyGeneratorMeta, prevScript) encounteredUserViewGeneratorScripts
+                    let prettyGeneratorMeta: PrettyUserViewsGeneratorScriptMeta = deserializeEntry entry
+
+                    let (prevMeta, prevScript) =
+                        Map.findWithLazyDefault
+                            schemaName
+                            (fun () -> (emptyPrettyUserViewsGeneratorScriptMeta, ""))
+                            encounteredUserViewGeneratorScripts
+
+                    encounteredUserViewGeneratorScripts <-
+                        Map.add schemaName (prettyGeneratorMeta, prevScript) encounteredUserViewGeneratorScripts
+
                     emptySchemaDump
                 | fileName when fileName = userViewsGeneratorEntry ->
                     let script = readEntry entry <| fun reader -> reader.ReadToEnd()
-                    let (prevMeta, prevScript) = Map.findWithLazyDefault schemaName (fun () -> (emptyPrettyUserViewsGeneratorScriptMeta, "")) encounteredUserViewGeneratorScripts
-                    encounteredUserViewGeneratorScripts <- Map.add schemaName (prevMeta, script) encounteredUserViewGeneratorScripts
+
+                    let (prevMeta, prevScript) =
+                        Map.findWithLazyDefault
+                            schemaName
+                            (fun () -> (emptyPrettyUserViewsGeneratorScriptMeta, ""))
+                            encounteredUserViewGeneratorScripts
+
+                    encounteredUserViewGeneratorScripts <-
+                        Map.add schemaName (prevMeta, script) encounteredUserViewGeneratorScripts
+
                     emptySchemaDump
                 | fileName -> raisef RestoreSchemaException "Invalid archive entry %O/%s" schemaName fileName
+
         (schemaName, dump)
 
     let dump =
         zip.Entries
-            |> Seq.map (parseZipEntry >> uncurry Map.singleton)
-            |> Seq.fold (Map.unionWith mergeSchemaDump) Map.empty
+        |> Seq.map (parseZipEntry >> uncurry Map.singleton)
+        |> Seq.fold (Map.unionWith mergeSchemaDump) Map.empty
 
-    let convertAction (KeyValue(ref : ActionRef, (meta : PrettyActionMeta, source))) =
-        let ret = { emptySchemaDump with Actions = Map.singleton ref.Name { Function = source; AllowBroken = meta.AllowBroken } }
+    let convertAction (KeyValue(ref: ActionRef, (meta: PrettyActionMeta, source))) =
+        let ret =
+            { emptySchemaDump with
+                Actions =
+                    Map.singleton
+                        ref.Name
+                        { Function = source
+                          AllowBroken = meta.AllowBroken } }
+
         (ref.Schema, ret)
+
     let dump =
         encounteredActions
-            |> Seq.map (convertAction >> uncurry Map.singleton)
-            |> Seq.fold (Map.unionWith mergeSchemaDump) dump
+        |> Seq.map (convertAction >> uncurry Map.singleton)
+        |> Seq.fold (Map.unionWith mergeSchemaDump) dump
 
-    let convertModule (KeyValue(ref : ModuleRef, (meta : PrettyModuleMeta, source))) =
-        let ret = { emptySchemaDump with Modules = Map.singleton ref.Path { Source = source; AllowBroken = meta.AllowBroken } }
+    let convertModule (KeyValue(ref: ModuleRef, (meta: PrettyModuleMeta, source))) =
+        let ret =
+            { emptySchemaDump with
+                Modules =
+                    Map.singleton
+                        ref.Path
+                        { Source = source
+                          AllowBroken = meta.AllowBroken } }
+
         (ref.Schema, ret)
+
     let dump =
         encounteredModules
-            |> Seq.map (convertModule >> uncurry Map.singleton)
-            |> Seq.fold (Map.unionWith mergeSchemaDump) dump
+        |> Seq.map (convertModule >> uncurry Map.singleton)
+        |> Seq.fold (Map.unionWith mergeSchemaDump) dump
 
-    let convertTrigger (KeyValue(ref : TriggerRef, data)) =
+    let convertTrigger (KeyValue(ref: TriggerRef, data)) =
         match data with
         | (Some meta, proc) ->
             let entityTriggers =
                 { Triggers = Map.singleton ref.Name (deprettifyTrigger meta proc) }
-            let schemaTriggers =
-                { Entities = Map.singleton ref.Entity.Name entityTriggers }
+
+            let schemaTriggers = { Entities = Map.singleton ref.Entity.Name entityTriggers }
+
             let ret =
                 { emptySchemaDump with
-                      Triggers = Map.singleton ref.Entity.Schema schemaTriggers
-                }
+                    Triggers = Map.singleton ref.Entity.Schema schemaTriggers }
+
             (ref.Schema, ret)
         | (None, _) -> raisef RestoreSchemaException "No meta description for trigger %O" ref
+
     let dump =
         encounteredTriggers
-            |> Seq.map (convertTrigger >> uncurry Map.singleton)
-            |> Seq.fold (Map.unionWith mergeSchemaDump) dump
+        |> Seq.map (convertTrigger >> uncurry Map.singleton)
+        |> Seq.fold (Map.unionWith mergeSchemaDump) dump
 
-    let convertUserView (KeyValue(ref : ResolvedUserViewRef, (meta : PrettyUserViewMeta, uv))) =
-        let ret = { emptySchemaDump with UserViews = Map.singleton ref.Name { Query = uv; AllowBroken = meta.AllowBroken } }
+    let convertUserView (KeyValue(ref: ResolvedUserViewRef, (meta: PrettyUserViewMeta, uv))) =
+        let ret =
+            { emptySchemaDump with
+                UserViews =
+                    Map.singleton
+                        ref.Name
+                        { Query = uv
+                          AllowBroken = meta.AllowBroken } }
+
         (ref.Schema, ret)
+
     let dump =
         encounteredUserViews
-            |> Seq.map (convertUserView >> uncurry Map.singleton)
-            |> Seq.fold (Map.unionWith mergeSchemaDump) dump
+        |> Seq.map (convertUserView >> uncurry Map.singleton)
+        |> Seq.fold (Map.unionWith mergeSchemaDump) dump
 
-    let convertUserViewsGeneratorScript (KeyValue(schemaName, (meta : PrettyUserViewsGeneratorScriptMeta, script))) =
-        let ret = { emptySchemaDump with UserViewsGeneratorScript = Some { Script = script; AllowBroken = meta.AllowBroken } }
+    let convertUserViewsGeneratorScript (KeyValue(schemaName, (meta: PrettyUserViewsGeneratorScriptMeta, script))) =
+        let ret =
+            { emptySchemaDump with
+                UserViewsGeneratorScript =
+                    Some
+                        { Script = script
+                          AllowBroken = meta.AllowBroken } }
+
         (schemaName, ret)
+
     let dump =
         encounteredUserViewGeneratorScripts
-            |> Seq.map (convertUserViewsGeneratorScript >> uncurry Map.singleton)
-            |> Seq.fold (Map.unionWith mergeSchemaDump) dump
+        |> Seq.map (convertUserViewsGeneratorScript >> uncurry Map.singleton)
+        |> Seq.fold (Map.unionWith mergeSchemaDump) dump
 
-    let convertSchema (schemaName : SchemaName) (savedSchema : SchemaDump) =
-        let settings = Map.findWithDefault schemaName emptyPrettySchemaSettings encounteredSettings
+    let convertSchema (schemaName: SchemaName) (savedSchema: SchemaDump) =
+        let settings =
+            Map.findWithDefault schemaName emptyPrettySchemaSettings encounteredSettings
+
         if settings.OnlyCustomEntities then
             if not <| schemaDumpHasNoSchema savedSchema then
                 raisef RestoreSchemaException "Schema %O should only contain custom entities" schemaName
+
             SSCustomEntities savedSchema.CustomEntities
         else
             SSFull savedSchema
+
     Map.map convertSchema dump

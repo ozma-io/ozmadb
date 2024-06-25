@@ -20,49 +20,61 @@ let timeCasesMap =
     |> Seq.map (fun (case, value) -> (Option.get (caseKey case.Info), value))
     |> dict
 
-let private makeSourceAttributeField (trig : Trigger) : SourceTrigger =
+let private makeSourceAttributeField (trig: Trigger) : SourceTrigger =
     { AllowBroken = trig.AllowBroken
       Priority = trig.Priority
       Time = timeCasesMap.[trig.Time]
       OnInsert = trig.OnInsert
       OnUpdateFields = Array.map OzmaQLName trig.OnUpdateFields
       OnDelete = trig.OnDelete
-      Procedure = trig.Procedure
-    }
+      Procedure = trig.Procedure }
 
-let private makeSourceTriggersDatabase (schema : Schema) : SourceTriggersDatabase =
-    let makeTriggers (entityName, attrs : Trigger seq) =
+let private makeSourceTriggersDatabase (schema: Schema) : SourceTriggersDatabase =
+    let makeTriggers (entityName, attrs: Trigger seq) =
         let fields =
             attrs
             |> Seq.map (fun attrs -> (OzmaQLName attrs.Name, makeSourceAttributeField attrs))
             |> Map.ofSeq
+
         (entityName, { Triggers = fields })
-    let makeEntities (schemaName, attrs : Trigger seq) =
+
+    let makeEntities (schemaName, attrs: Trigger seq) =
         let entities =
             attrs
             |> Seq.groupBy (fun attrs -> OzmaQLName attrs.TriggerEntity.Name)
             |> Seq.map makeTriggers
             |> Map.ofSeq
-        let schema = { Entities = entities } : SourceTriggersSchema
+
+        let schema = { Entities = entities }: SourceTriggersSchema
         (schemaName, schema)
+
     let schemas =
         schema.Triggers
         |> Seq.groupBy (fun attrs -> OzmaQLName attrs.TriggerEntity.Schema.Name)
         |> Seq.map makeEntities
         |> Map.ofSeq
+
     { Schemas = schemas }
 
-let buildSchemaTriggers (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourceTriggers> =
+let buildSchemaTriggers
+    (db: SystemContext)
+    (filter: Expression<Func<Schema, bool>> option)
+    (cancellationToken: CancellationToken)
+    : Task<SourceTriggers> =
     task {
         let currentSchemas = db.GetTriggersObjects()
+
         let currentSchemas =
             match filter with
             | None -> currentSchemas
             | Some expr -> currentSchemas.Where(expr)
-        let! schemas = currentSchemas.ToListAsync(cancellationToken)
-        let sourceSchemas = schemas |> Seq.map (fun schema -> (OzmaQLName schema.Name, makeSourceTriggersDatabase schema)) |> Map.ofSeqUnique
 
-        return
-            { Schemas = sourceSchemas
-            }
+        let! schemas = currentSchemas.ToListAsync(cancellationToken)
+
+        let sourceSchemas =
+            schemas
+            |> Seq.map (fun schema -> (OzmaQLName schema.Name, makeSourceTriggersDatabase schema))
+            |> Map.ofSeqUnique
+
+        return { Schemas = sourceSchemas }
     }

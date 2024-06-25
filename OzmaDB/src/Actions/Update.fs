@@ -16,42 +16,60 @@ open OzmaDB.Actions.Source
 open OzmaDB.Actions.Types
 open OzmaDB.Actions.Run
 
-type private ActionsUpdater (db : SystemContext) as this =
+type private ActionsUpdater(db: SystemContext) as this =
     inherit SystemUpdater(db)
 
-    let updateActionsField (action : SourceAction) (existingAction : Action) : unit =
+    let updateActionsField (action: SourceAction) (existingAction: Action) : unit =
         existingAction.AllowBroken <- action.AllowBroken
         existingAction.Function <- action.Function
 
-    let updateActionsDatabase (schema : SourceActionsSchema) (existingSchema : Schema) : unit =
+    let updateActionsDatabase (schema: SourceActionsSchema) (existingSchema: Schema) : unit =
         let oldActionsMap =
-            existingSchema.Actions |> Seq.map (fun action -> (OzmaQLName action.Name, action)) |> Map.ofSeq
+            existingSchema.Actions
+            |> Seq.map (fun action -> (OzmaQLName action.Name, action))
+            |> Map.ofSeq
 
         let updateFunc _ = updateActionsField
-        let createFunc (OzmaQLName actionName) =
-            Action (
-                Name = actionName,
-                Schema = existingSchema
-            )
-        ignore <| this.UpdateDifference updateFunc createFunc schema.Actions oldActionsMap
 
-    let updateSchemas (schemas : Map<SchemaName, SourceActionsSchema>) (existingSchemas : Map<SchemaName, Schema>) =
+        let createFunc (OzmaQLName actionName) =
+            Action(Name = actionName, Schema = existingSchema)
+
+        ignore
+        <| this.UpdateDifference updateFunc createFunc schema.Actions oldActionsMap
+
+    let updateSchemas (schemas: Map<SchemaName, SourceActionsSchema>) (existingSchemas: Map<SchemaName, Schema>) =
         let updateFunc name schema existingSchema =
             try
                 updateActionsDatabase schema existingSchema
-            with
-            | e -> raisefWithInner SystemUpdaterException e "In schema %O" name
+            with e ->
+                raisefWithInner SystemUpdaterException e "In schema %O" name
+
         this.UpdateRelatedDifference updateFunc schemas existingSchemas
 
     member this.UpdateSchemas schemas existingSchemas = updateSchemas schemas existingSchemas
 
-let updateActions (db : SystemContext) (actions : SourceActions) (cancellationToken : CancellationToken) : Task<UpdateResult> =
-    genericSystemUpdate db cancellationToken <| fun () ->
+let updateActions
+    (db: SystemContext)
+    (actions: SourceActions)
+    (cancellationToken: CancellationToken)
+    : Task<UpdateResult> =
+    genericSystemUpdate db cancellationToken
+    <| fun () ->
         task {
-            let currentSchemas = db.GetActionsObjects ()
+            let currentSchemas = db.GetActionsObjects()
             // We don't touch in any way schemas not in layout.
-            let wantedSchemas = actions.Schemas |> Map.toSeq |> Seq.map (fun (OzmaQLName name, schema) -> name) |> Seq.toArray
-            let! allSchemas = currentSchemas.AsTracking().Where(fun schema -> wantedSchemas.Contains(schema.Name)).ToListAsync(cancellationToken)
+            let wantedSchemas =
+                actions.Schemas
+                |> Map.toSeq
+                |> Seq.map (fun (OzmaQLName name, schema) -> name)
+                |> Seq.toArray
+
+            let! allSchemas =
+                currentSchemas
+                    .AsTracking()
+                    .Where(fun schema -> wantedSchemas.Contains(schema.Name))
+                    .ToListAsync(cancellationToken)
+
             let schemasMap =
                 allSchemas
                 |> Seq.map (fun schema -> (OzmaQLName schema.Name, schema))
@@ -63,26 +81,29 @@ let updateActions (db : SystemContext) (actions : SourceActions) (cancellationTo
             return updater
         }
 
-let private findBrokenActionsSchema (schemaName : SchemaName) (schema : PreparedActionsSchema) : ActionRef seq =
+let private findBrokenActionsSchema (schemaName: SchemaName) (schema: PreparedActionsSchema) : ActionRef seq =
     seq {
         for KeyValue(actionName, maybeAction) in schema.Actions do
             match maybeAction with
-            | Error e when not e.AllowBroken -> yield { Schema = schemaName; Name = actionName }
+            | Error e when not e.AllowBroken ->
+                yield
+                    { Schema = schemaName
+                      Name = actionName }
             | _ -> ()
     }
 
-let private findBrokenActions (actions : PreparedActions) : ActionRef seq =
+let private findBrokenActions (actions: PreparedActions) : ActionRef seq =
     seq {
         for KeyValue(schemaName, schema) in actions.Schemas do
             yield! findBrokenActionsSchema schemaName schema
     }
 
-let private checkActionName (ref : ActionRef) : Expr<Action -> bool> =
+let private checkActionName (ref: ActionRef) : Expr<Action -> bool> =
     let checkSchema = checkSchemaName ref.Schema
     let name = string ref.Name
     <@ fun action -> (%checkSchema) action.Schema && action.Name = name @>
 
-let markBrokenActions (db : SystemContext) (actions : PreparedActions) (cancellationToken : CancellationToken) : Task =
+let markBrokenActions (db: SystemContext) (actions: PreparedActions) (cancellationToken: CancellationToken) : Task =
     unitTask {
         let checks = findBrokenActions actions |> Seq.map checkActionName
         do! genericMarkBroken db.Actions checks cancellationToken

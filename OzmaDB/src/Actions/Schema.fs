@@ -13,31 +13,36 @@ open OzmaDB.Actions.Source
 open OzmaDB.OzmaQL.AST
 open OzmaDBSchema.System
 
-let private makeSourceAttributeField (action : Action) : ActionName * SourceAction =
+let private makeSourceAttributeField (action: Action) : ActionName * SourceAction =
     let ret =
         { AllowBroken = action.AllowBroken
-          Function = action.Function
-        }
+          Function = action.Function }
+
     (OzmaQLName action.Name, ret)
 
-let private makeSourceActionsSchema (schema : Schema) : SourceActionsSchema =
-    let actions =
-        schema.Actions
-        |> Seq.map makeSourceAttributeField
-        |> Map.ofSeq
+let private makeSourceActionsSchema (schema: Schema) : SourceActionsSchema =
+    let actions = schema.Actions |> Seq.map makeSourceAttributeField |> Map.ofSeq
     { Actions = actions }
 
-let buildSchemaActions (db : SystemContext) (filter : Expression<Func<Schema, bool>> option) (cancellationToken : CancellationToken) : Task<SourceActions> =
+let buildSchemaActions
+    (db: SystemContext)
+    (filter: Expression<Func<Schema, bool>> option)
+    (cancellationToken: CancellationToken)
+    : Task<SourceActions> =
     task {
         let currentSchemas = db.GetActionsObjects()
+
         let currentSchemas =
             match filter with
             | None -> currentSchemas
             | Some expr -> currentSchemas.Where(expr)
-        let! schemas = currentSchemas.ToListAsync(cancellationToken)
-        let sourceSchemas = schemas |> Seq.map (fun schema -> (OzmaQLName schema.Name, makeSourceActionsSchema schema)) |> Map.ofSeqUnique
 
-        return
-            { Schemas = sourceSchemas
-            }
+        let! schemas = currentSchemas.ToListAsync(cancellationToken)
+
+        let sourceSchemas =
+            schemas
+            |> Seq.map (fun schema -> (OzmaQLName schema.Name, makeSourceActionsSchema schema))
+            |> Map.ofSeqUnique
+
+        return { Schemas = sourceSchemas }
     }

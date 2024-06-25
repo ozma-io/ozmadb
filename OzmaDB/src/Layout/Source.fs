@@ -12,32 +12,30 @@ open OzmaDB.OzmaQL.AST
 // Source Layout; various layout sources, like database or system layout, are converted into this.
 
 type SourceUniqueConstraint =
-    { Columns : FieldName[]
-      IsAlternateKey : bool
+    { Columns: FieldName[]
+      IsAlternateKey: bool
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
 type SourceCheckConstraint =
-    { Expression : string
+    { Expression: string
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
 type IndexType =
-    | [<CaseKey("btree")>] [<DefaultCase>] ITBTree
+    | [<CaseKey("btree"); DefaultCase>] ITBTree
     | [<CaseKey("gist")>] ITGIST
     | [<CaseKey("gin")>] ITGIN
-    with
-        static member private LookupKey = prepareLookupCaseKey<IndexType>
 
-        override this.ToString () = this.ToOzmaQLString()
-        member this.ToOzmaQLString () = IndexType.LookupKey this |> Option.get
+    static member private LookupKey = prepareLookupCaseKey<IndexType>
 
-        interface IOzmaQLString with
-            member this.ToOzmaQLString () = this.ToOzmaQLString()
+    override this.ToString() = this.ToOzmaQLString()
+    member this.ToOzmaQLString() = IndexType.LookupKey this |> Option.get
+
+    interface IOzmaQLString with
+        member this.ToOzmaQLString() = this.ToOzmaQLString()
 
 let indexTypesMap =
     enumCases<IndexType>
@@ -45,114 +43,104 @@ let indexTypesMap =
     |> dict
 
 type SourceIndex =
-    { Expressions : string[]
-      IncludedExpressions : string[]
-      IsUnique : bool
-      Type : IndexType
-      Predicate : string option
+    { Expressions: string[]
+      IncludedExpressions: string[]
+      IsUnique: bool
+      Type: IndexType
+      Predicate: string option
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
 type SourceColumnField =
-    { Type : string
-      DefaultValue : string option
-      IsNullable : bool
-      IsImmutable : bool
+    { Type: string
+      DefaultValue: string option
+      IsNullable: bool
+      IsImmutable: bool
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
 type SourceComputedField =
-    { Expression : string
-      AllowBroken : bool
-      IsVirtual : bool
-      IsMaterialized : bool
+    { Expression: string
+      AllowBroken: bool
+      IsVirtual: bool
+      IsMaterialized: bool
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
 type SourceEntity =
-    { ColumnFields : Map<FieldName, SourceColumnField>
-      ComputedFields : Map<FieldName, SourceComputedField>
-      UniqueConstraints : Map<ConstraintName, SourceUniqueConstraint>
-      CheckConstraints : Map<ConstraintName, SourceCheckConstraint>
-      Indexes : Map<IndexName, SourceIndex>
-      MainField : FieldName option
-      SaveRestoreKey : ConstraintName option
+    { ColumnFields: Map<FieldName, SourceColumnField>
+      ComputedFields: Map<FieldName, SourceComputedField>
+      UniqueConstraints: Map<ConstraintName, SourceUniqueConstraint>
+      CheckConstraints: Map<ConstraintName, SourceCheckConstraint>
+      Indexes: Map<IndexName, SourceIndex>
+      MainField: FieldName option
+      SaveRestoreKey: ConstraintName option
       [<IgnoreDataMember>]
-      InsertedInternally : bool
+      InsertedInternally: bool
       [<IgnoreDataMember>]
-      UpdatedInternally : bool
+      UpdatedInternally: bool
       [<IgnoreDataMember>]
-      DeletedInternally : bool
+      DeletedInternally: bool
       [<IgnoreDataMember>]
-      TriggersMigration : bool
+      TriggersMigration: bool
       [<IgnoreDataMember>]
-      IsHidden : bool
-      IsAbstract : bool
-      IsFrozen : bool
-      Parent : ResolvedEntityRef option
+      IsHidden: bool
+      IsAbstract: bool
+      IsFrozen: bool
+      Parent: ResolvedEntityRef option
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
 type SourceSchema =
-    { Entities : Map<EntityName, SourceEntity>
+    { Entities: Map<EntityName, SourceEntity>
       [<DefaultValue("")>]
-      Description : string
-      Metadata : JsonMap
-    }
+      Description: string
+      Metadata: JsonMap }
 
-let emptySourceSchema : SourceSchema =
+let emptySourceSchema: SourceSchema =
     { Entities = Map.empty
       Description = ""
-      Metadata = JsonMap.empty
-    }
+      Metadata = JsonMap.empty }
 
-let unionDescription (a : string) (b : string) : string =
+let unionDescription (a: string) (b: string) : string =
     match (a, b) with
     | ("", b) -> b
     | (a, "") -> a
     | _ -> failwith "Cannot union non-empty descriptions"
 
-let unionMetadata (a : JsonMap) (b : JsonMap) : JsonMap =
+let unionMetadata (a: JsonMap) (b: JsonMap) : JsonMap =
     match (a.Count > 0, b.Count > 0) with
     | (_, false) -> a
     | (false, _) -> b
     | _ -> failwith "Cannot union non-empty metadata"
 
-let unionSourceSchema (a : SourceSchema) (b : SourceSchema) : SourceSchema =
+let unionSourceSchema (a: SourceSchema) (b: SourceSchema) : SourceSchema =
     { Entities = Map.unionUnique a.Entities b.Entities
       Description = unionDescription a.Description b.Description
-      Metadata = unionMetadata a.Metadata b.Metadata
-    }
+      Metadata = unionMetadata a.Metadata b.Metadata }
 
 type IEntitiesSet =
-    abstract member HasVisibleEntity : ResolvedEntityRef -> bool
+    abstract member HasVisibleEntity: ResolvedEntityRef -> bool
 
 type SourceLayout =
-    { Schemas : Map<SchemaName, SourceSchema>
-    } with
-        member this.FindEntity (entity : ResolvedEntityRef) =
-            match Map.tryFind entity.Schema this.Schemas with
-            | None -> None
-            | Some schema -> Map.tryFind entity.Name schema.Entities
+    { Schemas: Map<SchemaName, SourceSchema> }
 
-        interface IEntitiesSet with
-            member this.HasVisibleEntity ref =
-                match this.FindEntity ref with
-                | Some entity when not entity.IsHidden -> true
-                | _ -> false
+    member this.FindEntity(entity: ResolvedEntityRef) =
+        match Map.tryFind entity.Schema this.Schemas with
+        | None -> None
+        | Some schema -> Map.tryFind entity.Name schema.Entities
 
-let emptySourceLayout : SourceLayout =
-    { Schemas = Map.empty
-    }
+    interface IEntitiesSet with
+        member this.HasVisibleEntity ref =
+            match this.FindEntity ref with
+            | Some entity when not entity.IsHidden -> true
+            | _ -> false
 
-let unionSourceLayout (a : SourceLayout) (b : SourceLayout) : SourceLayout =
-    { Schemas = Map.unionWith unionSourceSchema a.Schemas b.Schemas
-    }
+let emptySourceLayout: SourceLayout = { Schemas = Map.empty }
+
+let unionSourceLayout (a: SourceLayout) (b: SourceLayout) : SourceLayout =
+    { Schemas = Map.unionWith unionSourceSchema a.Schemas b.Schemas }

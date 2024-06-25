@@ -49,39 +49,69 @@ open OzmaDB.EventLogger
 // Npgsql global type mapping is deprecated, but we are not sure how to make it better now.
 #nowarn "44"
 
-let private parseLimits : IList<OzmaDBSchema.Instances.RateLimit> -> RateLimit seq = function
+let private parseLimits: IList<OzmaDBSchema.Instances.RateLimit> -> RateLimit seq =
+    function
     | null -> Seq.empty
-    | limits -> limits |> Seq.map (fun limit -> { Period = limit.Period; Limit = limit.Limit })
+    | limits ->
+        limits
+        |> Seq.map (fun limit ->
+            { Period = limit.Period
+              Limit = limit.Limit })
 
-let private deenlistConnectionString (str : string) =
+let private deenlistConnectionString (str: string) =
     let builder = NpgsqlConnectionStringBuilder(str)
     builder.Enlist <- false
     string builder
 
-type private DatabaseInstances (loggerFactory : ILoggerFactory, lifetime : IHostApplicationLifetime, homeRegion: string option, connectionString : string, readOnlyConnectionString : string) =
+type private DatabaseInstances
+    (
+        loggerFactory: ILoggerFactory,
+        lifetime: IHostApplicationLifetime,
+        homeRegion: string option,
+        connectionString: string,
+        readOnlyConnectionString: string
+    ) =
     let connectionString = deenlistConnectionString connectionString
     let readOnlyConnectionString = deenlistConnectionString readOnlyConnectionString
     let logger = loggerFactory.CreateLogger<DatabaseInstances>()
 
-    new (loggerFactory : ILoggerFactory, lifetime : IHostApplicationLifetime, homeRegion: string option, connectionString : string) = DatabaseInstances (loggerFactory, lifetime, homeRegion, connectionString, connectionString)
+    new
+        (
+            loggerFactory: ILoggerFactory,
+            lifetime: IHostApplicationLifetime,
+            homeRegion: string option,
+            connectionString: string
+        ) =
+        DatabaseInstances(loggerFactory, lifetime, homeRegion, connectionString, connectionString)
 
     interface IInstancesSource with
         member this.Region = homeRegion
-        member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
+
+        member this.GetInstance (host: string) (cancellationToken: CancellationToken) =
             task {
                 let readOnlyInstances =
-                    let builder = DbContextOptionsBuilder<InstancesContext> ()
+                    let builder = DbContextOptionsBuilder<InstancesContext>()
                     setupDbContextLogging loggerFactory builder
-                    ignore <| builder.UseNpgsql(readOnlyConnectionString, fun opts -> ignore <| opts.UseNodaTime())
+
+                    ignore
+                    <| builder.UseNpgsql(readOnlyConnectionString, (fun opts -> ignore <| opts.UseNodaTime()))
+
                     new InstancesContext(builder.Options)
+
                 try
-                    let! result = readOnlyInstances.Instances.AsNoTracking().FirstOrDefaultAsync((fun x -> x.Name = host && x.Enabled), cancellationToken)
-                    do! readOnlyInstances.DisposeAsync ()
+                    let! result =
+                        readOnlyInstances.Instances
+                            .AsNoTracking()
+                            .FirstOrDefaultAsync((fun x -> x.Name = host && x.Enabled), cancellationToken)
+
+                    do! readOnlyInstances.DisposeAsync()
+
                     match result with
                     | null -> return None
                     | instance ->
                         let parsedRead = parseLimits instance.ReadRateLimitsPerUser
                         let parsedWrite = parseLimits instance.WriteRateLimitsPerUser
+
                         let obj =
                             { new IInstance with
                                 member this.Name = instance.Name
@@ -107,47 +137,66 @@ type private DatabaseInstances (loggerFactory : ILoggerFactory, lifetime : IHost
 
                                 member this.AccessedAt = Option.ofNullable instance.AccessedAt
 
-                                member this.UpdateAccessedAtAndDispose (newTime : Instant) =
+                                member this.UpdateAccessedAtAndDispose(newTime: Instant) =
                                     let updateJob () =
                                         unitTask {
                                             try
                                                 use instances =
-                                                    let builder = DbContextOptionsBuilder<InstancesContext> ()
+                                                    let builder = DbContextOptionsBuilder<InstancesContext>()
                                                     setupDbContextLogging loggerFactory builder
-                                                    ignore <| builder.UseNpgsql(connectionString, fun opts -> ignore <| opts.UseNodaTime())
+
+                                                    ignore
+                                                    <| builder.UseNpgsql(
+                                                        connectionString,
+                                                        fun opts -> ignore <| opts.UseNodaTime()
+                                                    )
+
                                                     new InstancesContext(builder.Options)
+
                                                 let! _ =
                                                     instances.Instances
                                                         // This doesn't work: https://github.com/dotnet/efcore/issues/14013
                                                         // .Where(fun inst -> inst.Id = instance.Id && (not inst.AccessedAt.HasValue || inst.AccessedAt.Value < newTime))
-                                                        .FromSql($"""SELECT * FROM "instances" WHERE "id" = {instance.Id} AND ("accessed_at" IS NULL OR "accessed_at" < {newTime})""")
-                                                        .ExecuteUpdateAsync((fun inst -> inst.SetProperty((fun inst -> inst.AccessedAt), (fun inst -> Nullable(newTime)))), lifetime.ApplicationStopping)
+                                                        .FromSql(
+                                                            $"""SELECT * FROM "instances" WHERE "id" = {instance.Id} AND ("accessed_at" IS NULL OR "accessed_at" < {newTime})"""
+                                                        )
+                                                        .ExecuteUpdateAsync(
+                                                            (fun inst ->
+                                                                inst.SetProperty(
+                                                                    (fun inst -> inst.AccessedAt),
+                                                                    (fun inst -> Nullable(newTime))
+                                                                )),
+                                                            lifetime.ApplicationStopping
+                                                        )
+
                                                 ()
-                                            with
-                                            | e -> logger.LogError(e, "Failed to update AccessedAt")
+                                            with e ->
+                                                logger.LogError(e, "Failed to update AccessedAt")
                                         }
+
                                     ignore <| Threading.Tasks.Task.Run(updateJob)
 
-                                  member this.Dispose () = ()
-                            }
+                                member this.Dispose() = () }
+
                         return Some obj
-                with
-                | e ->
-                    do! readOnlyInstances.DisposeAsync ()
+                with e ->
+                    do! readOnlyInstances.DisposeAsync()
                     return reraise' e
             }
 
-        member this.SetExtraConnectionOptions (builder : NpgsqlConnectionStringBuilder) =
+        member this.SetExtraConnectionOptions(builder: NpgsqlConnectionStringBuilder) =
             builder.CommandTimeout <- 0
             builder.ConnectionIdleLifetime <- 30
             builder.MaxAutoPrepare <- 50
 
-type private StaticInstance (instance : Instance, homeRegion: string option) =
+type private StaticInstance(instance: Instance, homeRegion: string option) =
     interface IInstancesSource with
         member this.Region = homeRegion
-        member this.GetInstance (host : string) (cancellationToken : CancellationToken) =
+
+        member this.GetInstance (host: string) (cancellationToken: CancellationToken) =
             let parsedRead = parseLimits instance.ReadRateLimitsPerUser
             let parsedWrite = parseLimits instance.WriteRateLimitsPerUser
+
             let obj =
                 { new IInstance with
                     member this.Name = instance.Name
@@ -174,15 +223,15 @@ type private StaticInstance (instance : Instance, homeRegion: string option) =
 
                     member this.UpdateAccessedAtAndDispose newTime = ()
 
-                    member this.Dispose () = ()
-                }
+                    member this.Dispose() = () }
+
             Task.result (Some obj)
 
-        member this.SetExtraConnectionOptions (builder : NpgsqlConnectionStringBuilder) =
+        member this.SetExtraConnectionOptions(builder: NpgsqlConnectionStringBuilder) =
             builder.CommandTimeout <- 0
             ()
 
-let private appEndpoints (serviceProvider : IServiceProvider) : Endpoint list =
+let private appEndpoints (serviceProvider: IServiceProvider) : Endpoint list =
     List.concat
         [ viewsApi serviceProvider
           entitiesApi serviceProvider
@@ -190,8 +239,7 @@ let private appEndpoints (serviceProvider : IServiceProvider) : Endpoint list =
           actionsApi serviceProvider
           infoApi serviceProvider
           permissionsApi serviceProvider
-          domainsApi serviceProvider
-        ]
+          domainsApi serviceProvider ]
 
 let private isDebug =
 #if DEBUG
@@ -200,109 +248,119 @@ let private isDebug =
     false
 #endif
 
-let private setupConfiguration (args : string[]) (webAppBuilder : WebApplicationBuilder) =
+let private setupConfiguration (args: string[]) (webAppBuilder: WebApplicationBuilder) =
     // Configuration.
     let configPath = args.[0]
-    ignore <| webAppBuilder.Configuration
+
+    ignore
+    <| webAppBuilder.Configuration
         .SetBasePath(Directory.GetCurrentDirectory())
         .AddJsonFile(configPath, false, isDebug)
         .AddEnvironmentVariables()
 
-let private setupLoggerConfiguration (configuration : LoggerConfiguration) =
-    ignore <| configuration
-        .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+let private setupLoggerConfiguration (configuration: LoggerConfiguration) =
+    ignore
+    <| configuration.MinimumLevel
+        .Override("Microsoft", LogEventLevel.Information)
         .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
         // We really, really don't use DataProtection.
         .MinimumLevel.Override("Microsoft.AspNetCore.DataProtection", LogEventLevel.Error)
         .Enrich.FromLogContext()
 
-let private setupLogging (webAppBuilder : WebApplicationBuilder) =
+let private setupLogging (webAppBuilder: WebApplicationBuilder) =
     let config = webAppBuilder.Configuration
 
-    let configureSerilog (context : HostBuilderContext) (services : IServiceProvider) (configuration : LoggerConfiguration) =
+    let configureSerilog
+        (context: HostBuilderContext)
+        (services: IServiceProvider)
+        (configuration: LoggerConfiguration)
+        =
         setupLoggerConfiguration configuration
-        ignore <| configuration
-            .ReadFrom.Configuration(config)
-            .ReadFrom.Services(services)
+
+        ignore
+        <| configuration.ReadFrom.Configuration(config).ReadFrom.Services(services)
+
         if not <| config.GetSection("Serilog").GetSection("WriteTo").Exists() then
             ignore <| configuration.WriteTo.Console()
 
     ignore <| webAppBuilder.Host.UseSerilog(configureSerilog)
 
-let private setupAuthentication (webAppBuilder : WebApplicationBuilder) =
+let private setupAuthentication (webAppBuilder: WebApplicationBuilder) =
     let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
     // Auth.
-    let configureAuthentication (o : AuthenticationOptions) =
+    let configureAuthentication (o: AuthenticationOptions) =
         o.DefaultAuthenticateScheme <- JwtBearerDefaults.AuthenticationScheme
         o.DefaultChallengeScheme <- JwtBearerDefaults.AuthenticationScheme
 
-    let configureJwtBearer (cfg : JwtBearerOptions) =
+    let configureJwtBearer (cfg: JwtBearerOptions) =
         cfg.Authority <- fundbSection.["AuthAuthority"]
-        cfg.TokenValidationParameters <- TokenValidationParameters (
-            ValidateAudience = false
-        )
+        cfg.TokenValidationParameters <- TokenValidationParameters(ValidateAudience = false)
         cfg.Events <- JwtBearerEvents()
         // https://stackoverflow.com/questions/48649717/addjwtbearer-onauthenticationfailed-return-custom-error
-        cfg.Events.OnChallenge <- fun ctx ->
-            ctx.HandleResponse ()
-            ctx.Response.StatusCode <- StatusCodes.Status401Unauthorized
-            ctx.Response.ContentType <- "application/json"
-            ctx.Response.Headers.WWWAuthenticate <- JwtBearerDefaults.AuthenticationScheme
-            ctx.Response.WriteAsync(JsonConvert.SerializeObject(RIUnauthorized))
+        cfg.Events.OnChallenge <-
+            fun ctx ->
+                ctx.HandleResponse()
+                ctx.Response.StatusCode <- StatusCodes.Status401Unauthorized
+                ctx.Response.ContentType <- "application/json"
+                ctx.Response.Headers.WWWAuthenticate <- JwtBearerDefaults.AuthenticationScheme
+                ctx.Response.WriteAsync(JsonConvert.SerializeObject(RIUnauthorized))
 
-    ignore <| services
-        .AddGiraffe()
-        .AddCors()
+    ignore <| services.AddGiraffe().AddCors()
+
     if not <| fundbSection.GetValue("DisableSecurity", false) then
-        ignore <| services
+        ignore
+        <| services
             .AddAuthentication(configureAuthentication)
             .AddJwtBearer(configureJwtBearer)
 
-let private setupRedis (webAppBuilder : WebApplicationBuilder) =
+let private setupRedis (webAppBuilder: WebApplicationBuilder) =
     let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
+
     match fundbSection.["Redis"] with
     | null -> ()
     | redisStr ->
         let redisOptions = Redis.ConfigurationOptions.Parse(redisStr)
-        let getRedisMultiplexer (sp : IServiceProvider) =
+
+        let getRedisMultiplexer (sp: IServiceProvider) =
             let connection =
                 Redis.ConnectionMultiplexer.Connect(redisOptions) :> Redis.IConnectionMultiplexer
+
             let db = connection.GetDatabase()
             connection
-        ignore <| services
-            .AddSingleton<Redis.IConnectionMultiplexer>(getRedisMultiplexer)
 
-let private setupRateLimiting (webAppBuilder : WebApplicationBuilder) =
+        ignore
+        <| services.AddSingleton<Redis.IConnectionMultiplexer>(getRedisMultiplexer)
+
+let private setupRateLimiting (webAppBuilder: WebApplicationBuilder) =
     let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
+
     match fundbSection.["Redis"] with
-    | null ->
-        ignore <| services
-            .AddMemoryCache()
-            .AddInMemoryRateLimiting()
-    | redisStr ->
-        ignore <| services
-            .AddRedisRateLimiting()
+    | null -> ignore <| services.AddMemoryCache().AddInMemoryRateLimiting()
+    | redisStr -> ignore <| services.AddRedisRateLimiting()
     // Needed for the strategy, but we ignore it in RateLimit.fs. Painful...
-    addRateLimiter services    
+    addRateLimiter services
 
-let private setupJSON (webAppBuilder : WebApplicationBuilder) =
-    ignore <| webAppBuilder.Services.AddSingleton<Json.ISerializer>(NewtonsoftJson.Serializer defaultJsonSettings)
+let private setupJSON (webAppBuilder: WebApplicationBuilder) =
+    ignore
+    <| webAppBuilder.Services.AddSingleton<Json.ISerializer>(NewtonsoftJson.Serializer defaultJsonSettings)
 
-let private setupEventLogger (webAppBuilder : WebApplicationBuilder) =
+let private setupEventLogger (webAppBuilder: WebApplicationBuilder) =
     let services = webAppBuilder.Services
 
-    let getEventLogger (sp : IServiceProvider) =
+    let getEventLogger (sp: IServiceProvider) =
         let logFactory = sp.GetRequiredService<ILoggerFactory>()
         new EventLogger(logFactory)
     // https://stackoverflow.com/a/59089881
     ignore <| services.AddSingleton<EventLogger>(getEventLogger)
-    ignore <| services.AddHostedService(fun sp -> sp.GetRequiredService<EventLogger>())
 
-let private setupInstancesCache (webAppBuilder : WebApplicationBuilder) =
+    ignore
+    <| services.AddHostedService(fun sp -> sp.GetRequiredService<EventLogger>())
+
+let private setupInstancesCache (webAppBuilder: WebApplicationBuilder) =
     let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
@@ -310,69 +368,92 @@ let private setupInstancesCache (webAppBuilder : WebApplicationBuilder) =
         match fundbSection.GetValue("Preloads") with
         | null -> emptySourcePreloadFile
         | path -> readSourcePreload path
+
     let preload = resolvePreload sourcePreload
 
-    let makeInstancesStore (sp : IServiceProvider) =
+    let makeInstancesStore (sp: IServiceProvider) =
         let cacheParams =
             { Preload = preload
               LoggerFactory = sp.GetRequiredService<ILoggerFactory>()
               EventLogger = sp.GetRequiredService<EventLogger>()
-              AllowAutoMark = fundbSection.GetValue("AllowAutoMark", false)
-            }
+              AllowAutoMark = fundbSection.GetValue("AllowAutoMark", false) }
+
         InstancesCacheStore cacheParams
+
     ignore <| services.AddSingleton<InstancesCacheStore>(makeInstancesStore)
 
-let private setupInstancesSource (webAppBuilder : WebApplicationBuilder) =
+let private setupInstancesSource (webAppBuilder: WebApplicationBuilder) =
     let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
-    let getInstancesSource (sp : IServiceProvider) : IInstancesSource =
+    let getInstancesSource (sp: IServiceProvider) : IInstancesSource =
         let homeRegion = Option.ofObj <| fundbSection.GetValue("HomeRegion", null)
+
         match fundbSection.["InstancesSource"] with
         | "database" ->
             let instancesConnectionString = fundbSection.GetConnectionString("Instances")
+
             let instancesReadOnlyConnectionString =
                 fundbSection.GetConnectionString("InstancesReadOnly")
                 |> Option.ofObj
                 |> Option.defaultValue instancesConnectionString
+
             let logFactory = sp.GetRequiredService<ILoggerFactory>()
             let lifetime = sp.GetRequiredService<IHostApplicationLifetime>()
-            DatabaseInstances(logFactory, lifetime, homeRegion, instancesConnectionString, instancesReadOnlyConnectionString) :> IInstancesSource
-        | "static" ->
-            let instance = Instance(
-                Owner = "owner@example.com"
+
+            DatabaseInstances(
+                logFactory,
+                lifetime,
+                homeRegion,
+                instancesConnectionString,
+                instancesReadOnlyConnectionString
             )
+            :> IInstancesSource
+        | "static" ->
+            let instance = Instance(Owner = "owner@example.com")
             fundbSection.GetSection("Instance").Bind(instance)
+
             if isNull instance.Database then
                 instance.Database <- instance.Username
+
             StaticInstance(instance, homeRegion) :> IInstancesSource
         | source -> failwithf "Invalid instancesSource: %s" source
+
     ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)
 
-let private setupHttpUtils (webAppBuilder : WebApplicationBuilder) =
+let private setupHttpUtils (webAppBuilder: WebApplicationBuilder) =
     let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
     ignore <| services.Configure<HttpJobSettings>(fundbSection.GetSection("Jobs"))
     ignore <| services.AddSingleton<HttpJobUtils>()
 
-let private setupApp (app : IApplicationBuilder) =
-    let configureMetrics (options : HttpMiddlewareExporterOptions) =
-        for name in seq { "Client"; "Email"; "Instance" } do
-            ignore <| options.AddCustomLabel(name.ToLower(), fun context ->
-                match context.Items.TryGetValue(name :> obj) with
-                | (true, value) -> value :?> string
-                | (false, _) -> null
+let private setupApp (app: IApplicationBuilder) =
+    let configureMetrics (options: HttpMiddlewareExporterOptions) =
+        for name in
+            seq {
+                "Client"
+                "Email"
+                "Instance"
+            } do
+            ignore
+            <| options.AddCustomLabel(
+                name.ToLower(),
+                fun context ->
+                    match context.Items.TryGetValue(name :> obj) with
+                    | (true, value) -> value :?> string
+                    | (false, _) -> null
             )
 
-    let configureCors (cfg : CorsPolicyBuilder) =
+    let configureCors (cfg: CorsPolicyBuilder) =
         ignore <| cfg.WithOrigins("*").AllowAnyHeader().AllowAnyMethod()
 
-    let configureEndpoints (endpoints : IEndpointRouteBuilder) =
+    let configureEndpoints (endpoints: IEndpointRouteBuilder) =
         ignore <| endpoints.MapMetrics()
         ignore <| endpoints.MapGiraffeEndpoints(appEndpoints endpoints.ServiceProvider)
 
-    ignore <| app
+    ignore
+    <| app
         .UseSerilogRequestLogging()
         .UseHttpMetrics(configureMetrics)
         .UseHttpMethodOverride()
@@ -386,13 +467,10 @@ let private setupApp (app : IApplicationBuilder) =
         .UseGiraffe(notFoundHandler)
 
 [<EntryPoint>]
-let main (args : string[]) : int =
+let main (args: string[]) : int =
     let loggerConfig = LoggerConfiguration()
     setupLoggerConfiguration loggerConfig
-    Log.Logger <-
-        loggerConfig
-            .WriteTo.Console()
-            .CreateBootstrapLogger()
+    Log.Logger <- loggerConfig.WriteTo.Console().CreateBootstrapLogger()
 
     try
         try
@@ -401,7 +479,9 @@ let main (args : string[]) : int =
             // Enable JSON and NodaTime for PostgreSQL.
             ignore <| NpgsqlConnection.GlobalTypeMapper.UseJsonNet()
             ignore <| NpgsqlConnection.GlobalTypeMapper.UseNodaTime()
-            ignore <| NpgsqlConnection.GlobalTypeMapper.AddTypeInfoResolverFactory(new ExtraTypeInfoResolverFactory());
+
+            ignore
+            <| NpgsqlConnection.GlobalTypeMapper.AddTypeInfoResolverFactory(new ExtraTypeInfoResolverFactory())
 
             let webAppBuilder = WebApplication.CreateBuilder()
             setupConfiguration args webAppBuilder
@@ -421,8 +501,7 @@ let main (args : string[]) : int =
             app.Run()
 
             0
-        with
-        | e ->
+        with e ->
             Log.Fatal(e, "Terminated unexpectedly")
             1
     finally

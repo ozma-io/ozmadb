@@ -8,7 +8,7 @@ open OzmaDB.API.Actions
 open OzmaDB.API.Permissions
 open OzmaDB.API.Domains
 
-type OzmaDBAPI (rctx : IRequestContext) as this =
+type OzmaDBAPI(rctx: IRequestContext) as this =
     let uv = lazy (UserViewsAPI this)
     let entities = lazy (EntitiesAPI this)
     let saveRestore = lazy (SaveRestoreAPI this)
@@ -16,8 +16,7 @@ type OzmaDBAPI (rctx : IRequestContext) as this =
     let permissions = lazy (PermissionsAPI this)
     let domains = lazy (DomainsAPI this)
 
-    do
-        rctx.Context.SetAPI this
+    do rctx.Context.SetAPI this
 
     member this.UserViews = uv.Value
     member this.Entities = entities.Value

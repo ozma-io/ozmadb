@@ -5,20 +5,24 @@ open FSharp.Text.Lexing
 
 open OzmaDB.OzmaUtils.Parsing
 
-let escapedString (startPos : int) (lexbuf: LexBuffer<_>) : string =
+let escapedString (startPos: int) (lexbuf: LexBuffer<_>) : string =
     let strBuilder = StringBuilder lexbuf.LexemeLength
-    let getCode (toNumber : char -> int option) (numBase : int) =
-        let rec go (minLen : int) (maxLen : int) (pos : int) (curr : int) =
+
+    let getCode (toNumber: char -> int option) (numBase: int) =
+        let rec go (minLen: int) (maxLen: int) (pos: int) (curr: int) =
             let returnNow () =
                 if minLen > 0 then
                     failwith <| sprintf "Invalid value escape sequence at position %i" pos
+
                 (curr, pos)
+
             if pos >= lexbuf.LexemeLength - 1 || maxLen = 0 then
                 returnNow ()
             else
                 match toNumber (lexbuf.LexemeChar pos) with
                 | Some n -> go (minLen - 1) (maxLen - 1) (pos + 1) (curr * numBase + n)
                 | None -> returnNow ()
+
         go
 
     let rec parseChar i =
@@ -27,7 +31,8 @@ let escapedString (startPos : int) (lexbuf: LexBuffer<_>) : string =
             | '\\' ->
                 if i = lexbuf.LexemeLength - 2 then
                     failwith "Unexpected escape at the end of string"
-                match lexbuf.LexemeChar (i + 1) with
+
+                match lexbuf.LexemeChar(i + 1) with
                 | '\\' ->
                     ignore <| strBuilder.Append('\\')
                     parseChar (i + 2)
@@ -47,7 +52,9 @@ let escapedString (startPos : int) (lexbuf: LexBuffer<_>) : string =
                     ignore <| strBuilder.Append('\t')
                     parseChar (i + 2)
                 | n when n >= '0' && n <= '9' ->
-                    let (ord, nextI) = getCode NumBases.octChar 8 0 2 (i + 2) (n |> NumBases.octChar |> Option.get)
+                    let (ord, nextI) =
+                        getCode NumBases.octChar 8 0 2 (i + 2) (n |> NumBases.octChar |> Option.get)
+
                     ignore <| strBuilder.Append(char ord)
                     parseChar nextI
                 | 'x' ->
@@ -73,7 +80,7 @@ let escapedString (startPos : int) (lexbuf: LexBuffer<_>) : string =
     parseChar (startPos + 1) // Skip quotes
     strBuilder.ToString()
 
-let escapedId (startPos : int) (lexbuf: LexBuffer<_>) : string =
+let escapedId (startPos: int) (lexbuf: LexBuffer<_>) : string =
     let strBuilder = StringBuilder lexbuf.LexemeLength
 
     let rec parseChar i =
@@ -82,6 +89,7 @@ let escapedId (startPos : int) (lexbuf: LexBuffer<_>) : string =
             | '"' ->
                 if i = lexbuf.LexemeLength - 2 then
                     failwith "Unexpected quote at the end of identifier"
+
                 match lexbuf.LexemeChar(i + 1) with
                 | '"' ->
                     ignore <| strBuilder.Append('"')
@@ -94,7 +102,7 @@ let escapedId (startPos : int) (lexbuf: LexBuffer<_>) : string =
     parseChar (startPos + 1) // Skip quotes
     strBuilder.ToString()
 
-let sqlString (startPos : int) (lexbuf: LexBuffer<_>) : string =
+let sqlString (startPos: int) (lexbuf: LexBuffer<_>) : string =
     let strBuilder = StringBuilder lexbuf.LexemeLength
 
     let rec parseChar i =
@@ -103,6 +111,7 @@ let sqlString (startPos : int) (lexbuf: LexBuffer<_>) : string =
             | '\'' ->
                 if i = lexbuf.LexemeLength - 2 then
                     failwith "Unexpected quote at the end of string"
+
                 match lexbuf.LexemeChar(i + 1) with
                 | '\'' ->
                     ignore <| strBuilder.Append('\'')
@@ -115,16 +124,17 @@ let sqlString (startPos : int) (lexbuf: LexBuffer<_>) : string =
     parseChar (startPos + 1) // Skip quotes
     strBuilder.ToString()
 
-let arrayString (startPos : int) (lexbuf: LexBuffer<_>) : string =
+let arrayString (startPos: int) (lexbuf: LexBuffer<_>) : string =
     let strBuilder = StringBuilder lexbuf.LexemeLength
 
     let rec parseChar i =
         if i < lexbuf.LexemeLength - 1 then
             match lexbuf.LexemeChar i with
-            | '\"' ->  failwith <| sprintf "Unexpected quote character at position %i" i
+            | '\"' -> failwith <| sprintf "Unexpected quote character at position %i" i
             | '\\' ->
                 if i = lexbuf.LexemeLength - 2 then
                     failwith "Unexpected escape at the end of string"
+
                 let nextC = lexbuf.LexemeChar(i + 1)
                 ignore <| strBuilder.Append(nextC)
                 parseChar (i + 2)

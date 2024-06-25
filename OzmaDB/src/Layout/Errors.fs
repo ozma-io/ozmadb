@@ -7,14 +7,15 @@ open OzmaDB.OzmaUtils.Serialization
 open OzmaDB.OzmaQL.AST
 open OzmaDB.Exception
 open OzmaDB.Layout.Types
+
 module SQL = OzmaDB.SQL.AST
 
 [<SerializeAsObject("error")>]
 type IntegrityQueryError =
-    | [<CaseKey("foreignKey")>] LQEForeignKey of Field : ResolvedFieldRef
-    | [<CaseKey("checkConstraint")>] LQECheckConstraint of Constraint : ResolvedConstraintRef
-    | [<CaseKey("uniqueConstraint")>] LQEUniqueConstraint of Constraint : ResolvedConstraintRef
-    with
+    | [<CaseKey("foreignKey")>] LQEForeignKey of Field: ResolvedFieldRef
+    | [<CaseKey("checkConstraint")>] LQECheckConstraint of Constraint: ResolvedConstraintRef
+    | [<CaseKey("uniqueConstraint")>] LQEUniqueConstraint of Constraint: ResolvedConstraintRef
+
     member this.LogMessage =
         match this with
         | LQEForeignKey ref -> sprintf "Foreign key %O is violated" ref
@@ -30,8 +31,7 @@ type IntegrityQueryError =
     member this.Details = Map.empty
 
     static member private LookupKey = prepareLookupCaseKey<IntegrityQueryError>
-    member this.Error =
-        IntegrityQueryError.LookupKey this |> Option.get
+    member this.Error = IntegrityQueryError.LookupKey this |> Option.get
 
     interface ILoggableResponse with
         member this.ShouldLog = this.ShouldLog
@@ -44,11 +44,12 @@ type IntegrityQueryError =
         member this.Error = this.Error
 
 let inline private findNameInLayout
-        (layout : Layout)
-        (schemaName : string)
-        (objectName : string)
-        ([<InlineIfLambda>] getSchemaObjects : ResolvedSchema -> Map<SQL.SQLName, 'a>)
-        ([<InlineIfLambda>] convert : 'a -> 'b) : 'b option =
+    (layout: Layout)
+    (schemaName: string)
+    (objectName: string)
+    ([<InlineIfLambda>] getSchemaObjects: ResolvedSchema -> Map<SQL.SQLName, 'a>)
+    ([<InlineIfLambda>] convert: 'a -> 'b)
+    : 'b option =
     match Map.tryFind (OzmaQLName schemaName) layout.Schemas with
     | None -> None
     | Some schema ->
@@ -56,7 +57,7 @@ let inline private findNameInLayout
         | None -> None
         | Some object -> Some <| convert object
 
-let extractIntegrityQueryError (layout : Layout) (e : PostgresException) : IntegrityQueryError option =
+let extractIntegrityQueryError (layout: Layout) (e: PostgresException) : IntegrityQueryError option =
     match e.SqlState with
     | "23503" ->
         findNameInLayout
