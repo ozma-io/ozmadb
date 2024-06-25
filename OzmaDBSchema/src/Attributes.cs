@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace OzmaDBSchema.Attributes
 {
@@ -20,7 +20,7 @@ namespace OzmaDBSchema.Attributes
         }
     }
 
-    [AttributeUsage(AttributeTargets.Property, AllowMultiple=true)]
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
     public class UniqueConstraintAttribute : Attribute
     {
         public string Name { get; }
@@ -34,7 +34,7 @@ namespace OzmaDBSchema.Attributes
         }
     }
 
-    [AttributeUsage(AttributeTargets.Property, AllowMultiple=true)]
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
     public class CheckConstraintAttribute : Attribute
     {
         public string Name { get; }
@@ -47,7 +47,7 @@ namespace OzmaDBSchema.Attributes
         }
     }
 
-    [AttributeUsage(AttributeTargets.Property, AllowMultiple=true)]
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
     public class IndexAttribute : Attribute
     {
         public string Name { get; }
@@ -64,7 +64,7 @@ namespace OzmaDBSchema.Attributes
         }
     }
 
-    [AttributeUsage(AttributeTargets.Property, AllowMultiple=true)]
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
     public class ComputedFieldAttribute : Attribute
     {
         public string Name { get; }

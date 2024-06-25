@@ -122,10 +122,10 @@ namespace OzmaDBSchema.PgCatalog
                 .Include(attr => attr.AttrDef)
                 .Where(attr => classesIds.Contains(attr.AttRelId) && attr.AttNum > 0 && !attr.AttIsDropped)
                 .Select(attr => new
-                    {
-                        Attribute = attr,
-                        Source = PgGetExpr(EF.Property<string>(attr.AttrDef!, "AdBin"), attr.AttrDef!.AdRelId),
-                    })
+                {
+                    Attribute = attr,
+                    Source = PgGetExpr(EF.Property<string>(attr.AttrDef!, "AdBin"), attr.AttrDef!.AdRelId),
+                })
                 .ToListAsync();
             var attrs = attrsList
                 .Select(attr =>
@@ -142,10 +142,10 @@ namespace OzmaDBSchema.PgCatalog
                 .Include(constr => constr.FRelClass).ThenInclude(rcl => rcl!.Namespace)
                 .Where(constr => classesIds.Contains(constr.ConRelId))
                 .Select(constr => new
-                    {
-                        Constraint = constr,
-                        Source = PgGetExpr(EF.Property<string>(constr, "ConBin"), constr.ConRelId),
-                    })
+                {
+                    Constraint = constr,
+                    Source = PgGetExpr(EF.Property<string>(constr, "ConBin"), constr.ConRelId),
+                })
                 .ToListAsync();
             var constrs = constrsList
                 .Select(constr =>
@@ -163,16 +163,16 @@ namespace OzmaDBSchema.PgCatalog
                 .Include(trig => trig.Constraint)
                 .Where(trig => classesIds.Contains(trig.TgRelId) && !trig.TgIsInternal)
                 .Select(trig => new
-                    {
-                        Trigger = trig,
-                        Source = PgGetTriggerDef(trig.Oid),
-                    })
+                {
+                    Trigger = trig,
+                    Source = PgGetTriggerDef(trig.Oid),
+                })
                 .ToListAsync();
             var triggers = triggersList
                 .Select(trig =>
                 {
-                        trig.Trigger.Source = trig.Source;
-                        return trig.Trigger;
+                    trig.Trigger.Source = trig.Source;
+                    return trig.Trigger;
                 })
                 .GroupBy(trig => trig.TgRelId)
                 .ToDictionary(g => g.Key, g => g.ToList());
@@ -190,12 +190,12 @@ namespace OzmaDBSchema.PgCatalog
                     classesIds.Contains(index.IndRelId) &&
                     !this.Constraints.AsQueryable().Where(constr => constr.ConIndId == index.IndexRelId).Any())
                 .Select(index => new
-                    {
-                        Index = index,
-                        ExprsSource = PgGetExpr(EF.Property<string>(index, "IndExprs"), index.IndRelId),
-                        PredSource = PgGetExpr(EF.Property<string>(index, "IndPred"), index.IndRelId),
-                        AmCanOrder = PgIndexamHasProperty(index.Class!.Am!.Oid, "can_order"),
-                    })
+                {
+                    Index = index,
+                    ExprsSource = PgGetExpr(EF.Property<string>(index, "IndExprs"), index.IndRelId),
+                    PredSource = PgGetExpr(EF.Property<string>(index, "IndPred"), index.IndRelId),
+                    AmCanOrder = PgIndexamHasProperty(index.Class!.Am!.Oid, "can_order"),
+                })
                 .ToListAsync();
             var indexes = indexesList
                 .Select(index =>
@@ -226,7 +226,7 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Namespace
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
         [Required]
@@ -240,15 +240,15 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Class
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
         [Required]
         public string RelName { get; set; } = null!;
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint RelNamespace { get; set; }
         public char RelKind { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint? RelAm { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
 
         [ForeignKey("RelNamespace")]
@@ -267,11 +267,11 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Attribute
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint AttRelId { get; set; }
         [Required]
         public string AttName { get; set; } = null!;
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint AttTypId { get; set; }
         public Int16 AttNum { get; set; }
         public bool AttNotNull { get; set; }
@@ -288,7 +288,7 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Type
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
         [Required]
@@ -298,7 +298,7 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Language
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
         [Required]
@@ -307,10 +307,10 @@ namespace OzmaDBSchema.PgCatalog
 
     public class AttrDef
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint AdRelId { get; set; }
         public Int16 AdNum { get; set; }
 
@@ -324,17 +324,17 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Constraint
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
         [Required]
         public string ConName { get; set; } = null!;
         public char ConType { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint ConRelId { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint? ConIndId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint? ConFRelId { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN for confrelid.
         public Int16[]? ConKey { get; set; }
         public Int16[]? ConFKey { get; set; }
@@ -354,18 +354,18 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Trigger
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint TgRelId { get; set; }
         [Required]
         public string TgName { get; set; } = null!;
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint TgFOid { get; set; }
         public bool TgIsInternal { get; set; }
         public Int16 TgType { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint? TgConstraint { get; set; } // Trick to make EFCore generate LEFT JOIN instead of INNER JOIN
         [Required]
         public Int16[] TgAttr { get; set; } = null!;
@@ -385,17 +385,17 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Proc
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
         [Required]
         public string ProName { get; set; } = null!;
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint ProNamespace { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint ProLang { get; set; }
         public Int16 ProNArgs { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint ProRetType { get; set; }
         public char ProVolatile { get; set; }
         public bool ProRetSet { get; set; }
@@ -419,20 +419,20 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Index
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint IndexRelId { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint IndRelId { get; set; }
-        public Int16 IndNKeyAtts { get; set;}
+        public Int16 IndNKeyAtts { get; set; }
         public bool IndIsUnique { get; set; }
         [Required]
         public Int16[] IndKey { get; set; } = null!;
         [Required]
-        [Column(TypeName="oid[]")]
+        [Column(TypeName = "oid[]")]
         public uint[] IndClass { get; set; } = null!;
         [Required]
-        [Column(TypeName="int2[]")]
+        [Column(TypeName = "int2[]")]
         public IndexOptions[] IndOption { get; set; } = null!;
 
         [ForeignKey("IndexRelId")]
@@ -450,14 +450,14 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Depend
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint ClassId { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint ObjId { get; set; }
         public int ObjSubId { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint RefClassId { get; set; }
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint RefObjId { get; set; }
         public int RefObjSubId { get; set; }
         public char DepType { get; set; }
@@ -465,13 +465,13 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Extension
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
 
         [Required]
         public string ExtName { get; set; } = null!;
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint ExtNamespace { get; set; }
         public bool ExtRelocatable { get; set; }
 
@@ -481,13 +481,13 @@ namespace OzmaDBSchema.PgCatalog
 
     public class OpClass
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
 
         [Required]
         public string OpcName { get; set; } = null!;
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         public uint OpcNamespace { get; set; }
         public bool OpcDefault { get; set; }
 
@@ -497,7 +497,7 @@ namespace OzmaDBSchema.PgCatalog
 
     public class Am
     {
-        [Column(TypeName="oid")]
+        [Column(TypeName = "oid")]
         [Key]
         public uint Oid { get; set; }
 

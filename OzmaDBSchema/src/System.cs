@@ -14,133 +14,133 @@ namespace OzmaDBSchema.System
 {
     public class SystemContext : PostgresContext
     {
-        [Entity("name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, IsHidden=true)]
-        [UniqueConstraint("name", new [] {"name"}, IsAlternateKey=true)]
+        [Entity("name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, IsHidden = true)]
+        [UniqueConstraint("name", new[] { "name" }, IsAlternateKey = true)]
         [CheckConstraint("not_empty", "name <> ''")]
         public DbSet<StateValue> State { get; set; } = null!;
 
-        [Entity("name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
-        [UniqueConstraint("name", new [] {"name"}, IsAlternateKey=true)]
+        [Entity("name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
+        [UniqueConstraint("name", new[] { "name" }, IsAlternateKey = true)]
         public DbSet<Schema> Schemas { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"schema_id", "name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "schema_id", "name" }, IsAlternateKey = true)]
         public DbSet<Entity> Entities { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"entity_id", "name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "entity_id", "name" }, IsAlternateKey = true)]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> '' AND name <> 'id' AND name <> 'sub_entity'")]
         public DbSet<ColumnField> ColumnFields { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"entity_id", "name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "entity_id", "name" }, IsAlternateKey = true)]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> '' AND name <> 'id' AND name <> 'sub_entity'")]
         public DbSet<ComputedField> ComputedFields { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"entity_id", "name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "entity_id", "name" }, IsAlternateKey = true)]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
         [CheckConstraint("not_empty", "columns <> (array[] :: array(string))")]
         public DbSet<UniqueConstraint> UniqueConstraints { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"entity_id", "name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "entity_id", "name" }, IsAlternateKey = true)]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
         public DbSet<CheckConstraint> CheckConstraints { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"entity_id", "name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "entity_id", "name" }, IsAlternateKey = true)]
         [CheckConstraint("not_reserved", "name NOT LIKE '%\\\\_\\\\_%' AND name <> ''")]
         [CheckConstraint("not_empty", "expressions <> (array[] :: array(string))")]
         public DbSet<Index> Indexes { get; set; } = null!;
 
-        [Entity("name", SaveRestoreKey="schema", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("name", SaveRestoreKey = "schema", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("name", "schema_id=>__main")]
-        [UniqueConstraint("schema", new [] {"schema_id"}, IsAlternateKey=true)]
+        [UniqueConstraint("schema", new[] { "schema_id" }, IsAlternateKey = true)]
         public DbSet<UserViewGenerator> UserViewGenerators { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"schema_id", "name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "schema_id", "name" }, IsAlternateKey = true)]
         [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<UserView> UserViews { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"schema_id", "name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "schema_id", "name" }, IsAlternateKey = true)]
         [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<Role> Roles { get; set; } = null!;
 
-        [Entity("id", SaveRestoreKey="entry", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
-        [UniqueConstraint("entry", new [] {"role_id", "parent_id"}, IsAlternateKey=true)]
+        [Entity("id", SaveRestoreKey = "entry", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
+        [UniqueConstraint("entry", new[] { "role_id", "parent_id" }, IsAlternateKey = true)]
         public DbSet<RoleParent> RoleParents { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="entry", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "entry", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "role_id=>__main || '.' || entity_id=>__main")]
-        [UniqueConstraint("entry", new [] {"role_id", "entity_id"}, IsAlternateKey=true)]
+        [UniqueConstraint("entry", new[] { "role_id", "entity_id" }, IsAlternateKey = true)]
         public DbSet<RoleEntity> RoleEntities { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "role_entity_id=>__main || '.' || column_name")]
-        [UniqueConstraint("name", new [] {"role_entity_id", "column_name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "role_entity_id", "column_name" }, IsAlternateKey = true)]
         public DbSet<RoleColumnField> RoleColumnFields { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || field_entity_id=>__main || '.' || field_name")]
-        [UniqueConstraint("name", new [] {"schema_id", "field_entity_id", "field_name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "schema_id", "field_entity_id", "field_name" }, IsAlternateKey = true)]
         public DbSet<FieldAttributes> FieldsAttributes { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="path", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "path", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || path")]
-        [UniqueConstraint("path", new [] {"schema_id", "path"}, IsAlternateKey=true)]
+        [UniqueConstraint("path", new[] { "schema_id", "path" }, IsAlternateKey = true)]
         public DbSet<Module> Modules { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"schema_id", "name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "schema_id", "name" }, IsAlternateKey = true)]
         public DbSet<Action> Actions { get; set; } = null!;
 
-        [Entity("full_name", SaveRestoreKey="name", InsertedInternally=true, UpdatedInternally=true, DeletedInternally=true, TriggersMigration=true)]
+        [Entity("full_name", SaveRestoreKey = "name", InsertedInternally = true, UpdatedInternally = true, DeletedInternally = true, TriggersMigration = true)]
         [ComputedField("full_name", "schema_id=>__main || '.' || trigger_entity_id=>__main || '.' || name")]
-        [UniqueConstraint("name", new [] {"schema_id", "trigger_entity_id", "name"}, IsAlternateKey=true)]
+        [UniqueConstraint("name", new[] { "schema_id", "trigger_entity_id", "name" }, IsAlternateKey = true)]
         public DbSet<Trigger> Triggers { get; set; } = null!;
 
         [Entity("name")]
-        [Attributes.Index("name", new [] {"lower(name)"}, IsUnique=true)]
+        [Attributes.Index("name", new[] { "lower(name)" }, IsUnique = true)]
         [CheckConstraint("not_reserved", "name <> ''")]
         public DbSet<User> Users { get; set; } = null!;
 
-        [Entity("id", InsertedInternally=true, IsFrozen=true)]
+        [Entity("id", InsertedInternally = true, IsFrozen = true)]
 
-        [Attributes.Index("transaction_id", new [] {"\"transaction_id\""})]
-        [Attributes.Index("type", new [] {"\"type\""})]
-        [Attributes.Index("timestamp", new [] {"\"timestamp\""})]
-        [Attributes.Index("user_name", new [] {"\"user_name\""})]
+        [Attributes.Index("transaction_id", new[] { "\"transaction_id\"" })]
+        [Attributes.Index("type", new[] { "\"type\"" })]
+        [Attributes.Index("timestamp", new[] { "\"timestamp\"" })]
+        [Attributes.Index("user_name", new[] { "\"user_name\"" })]
         [Attributes.Index(
             "request_user_view",
-            new [] {"\"request\"->'source'->>'schema'", "\"request\"->'source'->>'name'", "\"timestamp\""},
-            Predicate="\"request\"->'source'->>'schema' IS NOT NULL AND \"request\"->'source'->>'name' IS NOT NULL"
+            new[] { "\"request\"->'source'->>'schema'", "\"request\"->'source'->>'name'", "\"timestamp\"" },
+            Predicate = "\"request\"->'source'->>'schema' IS NOT NULL AND \"request\"->'source'->>'name' IS NOT NULL"
         )]
         [Attributes.Index(
             "request_entity_id",
-            new [] {"\"request\"->'entity'->>'schema'", "\"request\"->'entity'->>'name'", "(\"details\"->>'id')::int", "\"timestamp\""},
-            Predicate="\"request\"->'entity'->>'schema' IS NOT NULL AND \"request\"->'entity'->>'name' IS NOT NULL AND \"details\"->>'id' IS NOT NULL"
+            new[] { "\"request\"->'entity'->>'schema'", "\"request\"->'entity'->>'name'", "(\"details\"->>'id')::int", "\"timestamp\"" },
+            Predicate = "\"request\"->'entity'->>'schema' IS NOT NULL AND \"request\"->'entity'->>'name' IS NOT NULL AND \"details\"->>'id' IS NOT NULL"
         )]
         [Attributes.Index(
             "request_entity",
-            new [] {"\"request\"->'entity'->>'schema'", "\"request\"->'entity'->>'name'", "\"timestamp\""},
-            Predicate="\"request\"->'entity'->>'schema' IS NOT NULL AND \"request\"->'entity'->>'name' IS NOT NULL")
+            new[] { "\"request\"->'entity'->>'schema'", "\"request\"->'entity'->>'name'", "\"timestamp\"" },
+            Predicate = "\"request\"->'entity'->>'schema' IS NOT NULL AND \"request\"->'entity'->>'name' IS NOT NULL")
         ]
         [Attributes.Index(
             "error_type",
-            new [] {"\"error\"->>'error'"},
-            Predicate="\"error\"->>'error' IS NOT NULL"
+            new[] { "\"error\"->>'error'" },
+            Predicate = "\"error\"->>'error' IS NOT NULL"
         )]
         public DbSet<EventEntry> Events { get; set; } = null!;
 
@@ -252,15 +252,15 @@ namespace OzmaDBSchema.System
     {
         public int Id { get; set; }
 
-        [ColumnField("string", IsImmutable=true)]
+        [ColumnField("string", IsImmutable = true)]
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("string", Default="''")]
+        [ColumnField("string", Default = "''")]
         [Required]
         public string Description { get; set; } = "";
-        [ColumnField("json", Default="{}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", Default = "{}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Metadata { get; set; } = "{}";
 
@@ -278,35 +278,35 @@ namespace OzmaDBSchema.System
     {
         public int Id { get; set; }
 
-        [ColumnField("string", IsImmutable=true)]
+        [ColumnField("string", IsImmutable = true)]
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("string", Default="''")]
+        [ColumnField("string", Default = "''")]
         [Required]
         public string Description { get; set; } = "";
-        [ColumnField("json", Default="{}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", Default = "{}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Metadata { get; set; } = "{}";
 
-        [ColumnField("reference(public.schemas)", IsImmutable=true)]
+        [ColumnField("reference(public.schemas)", IsImmutable = true)]
         public int SchemaId { get; set; }
         public Schema? Schema { get; set; }
 
         [ColumnField("string")]
         public string? MainField { get; set; }
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool IsAbstract { get; set; }
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool IsFrozen { get; set; }
 
         [ColumnField("string")]
         public string? SaveRestoreKey { get; set; }
 
-        [ColumnField("reference(public.entities)", IsImmutable=true)]
+        [ColumnField("reference(public.entities)", IsImmutable = true)]
         public int? ParentId { get; set; }
         public Entity? Parent { get; set; }
 
@@ -321,19 +321,19 @@ namespace OzmaDBSchema.System
     {
         public int Id { get; set; }
 
-        [ColumnField("string", IsImmutable=true)]
+        [ColumnField("string", IsImmutable = true)]
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("string", Default="''")]
+        [ColumnField("string", Default = "''")]
         [Required]
         public string Description { get; set; } = "";
-        [ColumnField("json", Default="{}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", Default = "{}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Metadata { get; set; } = "{}";
 
-        [ColumnField("reference(public.entities) on delete cascade", IsImmutable=true)]
+        [ColumnField("reference(public.entities) on delete cascade", IsImmutable = true)]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
 
@@ -344,10 +344,10 @@ namespace OzmaDBSchema.System
         [ColumnField("string")]
         public string? Default { get; set; }
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool IsNullable { get; set; }
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool IsImmutable { get; set; }
     }
 
@@ -355,29 +355,29 @@ namespace OzmaDBSchema.System
     {
         public int Id { get; set; }
 
-        [ColumnField("string", IsImmutable=true)]
+        [ColumnField("string", IsImmutable = true)]
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("string", Default="''")]
+        [ColumnField("string", Default = "''")]
         [Required]
         public string Description { get; set; } = "";
-        [ColumnField("json", Default="{}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", Default = "{}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Metadata { get; set; } = "{}";
 
-        [ColumnField("reference(public.entities) on delete cascade", IsImmutable=true)]
+        [ColumnField("reference(public.entities) on delete cascade", IsImmutable = true)]
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool AllowBroken { get; set; }
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool IsVirtual { get; set; }
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool IsMaterialized { get; set; }
 
         [ColumnField("string")]
@@ -393,11 +393,11 @@ namespace OzmaDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("string", Default="''")]
+        [ColumnField("string", Default = "''")]
         [Required]
         public string Description { get; set; } = "";
-        [ColumnField("json", Default="{}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", Default = "{}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Metadata { get; set; } = "{}";
 
@@ -405,7 +405,7 @@ namespace OzmaDBSchema.System
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool IsAlternateKey { get; set; }
 
         // Order is important here.
@@ -422,11 +422,11 @@ namespace OzmaDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("string", Default="''")]
+        [ColumnField("string", Default = "''")]
         [Required]
         public string Description { get; set; } = "";
-        [ColumnField("json", Default="{}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", Default = "{}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Metadata { get; set; } = "{}";
 
@@ -447,11 +447,11 @@ namespace OzmaDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("string", Default="''")]
+        [ColumnField("string", Default = "''")]
         [Required]
         public string Description { get; set; } = "";
-        [ColumnField("json", Default="{}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", Default = "{}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Metadata { get; set; } = "{}";
 
@@ -464,17 +464,17 @@ namespace OzmaDBSchema.System
         [Required]
         public string[] Expressions { get; set; } = null!;
 
-        [ColumnField("array(string)", Default="array[]")]
+        [ColumnField("array(string)", Default = "array[]")]
         [Required]
         public string[] IncludedExpressions { get; set; } = new string[0];
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool IsUnique { get; set; }
 
         [ColumnField("string")]
         public string? Predicate { get; set; }
 
-        [ColumnField("enum('btree', 'gist', 'gin')", Default="'btree'")]
+        [ColumnField("enum('btree', 'gist', 'gin')", Default = "'btree'")]
         [Required]
         public string Type { get; set; } = "btree";
     }
@@ -491,7 +491,7 @@ namespace OzmaDBSchema.System
         [Required]
         public string Script { get; set; } = null!;
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool AllowBroken { get; set; }
     }
 
@@ -507,7 +507,7 @@ namespace OzmaDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool AllowBroken { get; set; }
 
         [ColumnField("string")]
@@ -527,15 +527,15 @@ namespace OzmaDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("string", Default="''")]
+        [ColumnField("string", Default = "''")]
         [Required]
         public string Description { get; set; } = "";
-        [ColumnField("json", Default="{}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", Default = "{}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Metadata { get; set; } = "{}";
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool AllowBroken { get; set; }
 
         public List<RoleParent>? Parents { get; set; }
@@ -568,10 +568,10 @@ namespace OzmaDBSchema.System
         public int EntityId { get; set; }
         public Entity? Entity { get; set; }
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool AllowBroken { get; set; }
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool Insert { get; set; }
 
         [ColumnField("string")]
@@ -602,7 +602,7 @@ namespace OzmaDBSchema.System
         [Required]
         public string ColumnName { get; set; } = null!;
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool Insert { get; set; }
 
         [ColumnField("string")]
@@ -631,10 +631,10 @@ namespace OzmaDBSchema.System
         [Required]
         public string FieldName { get; set; } = null!;
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool AllowBroken { get; set; }
 
-        [ColumnField("int", Default="0")]
+        [ColumnField("int", Default = "0")]
         public int Priority { get; set; }
 
         [ColumnField("string")]
@@ -657,7 +657,7 @@ namespace OzmaDBSchema.System
         [ColumnField("string")]
         [Required]
         public string Source { get; set; } = null!;
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool AllowBroken { get; set; }
     }
 
@@ -673,7 +673,7 @@ namespace OzmaDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool AllowBroken { get; set; }
 
         [ColumnField("string")]
@@ -697,23 +697,23 @@ namespace OzmaDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool AllowBroken { get; set; }
 
-        [ColumnField("int", Default="0")]
+        [ColumnField("int", Default = "0")]
         public int Priority { get; set; }
 
         [ColumnField("enum('BEFORE', 'AFTER')")]
         [Required]
         public string Time { get; set; } = null!;
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool OnInsert { get; set; }
 
-        [ColumnField("array(string)", Default="array[]")]
+        [ColumnField("array(string)", Default = "array[]")]
         public string[] OnUpdateFields { get; set; } = new string[0];
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool OnDelete { get; set; }
 
         [ColumnField("string")]
@@ -729,22 +729,22 @@ namespace OzmaDBSchema.System
         [Required]
         public string Name { get; set; } = null!;
 
-        [ColumnField("string", Default="''")]
+        [ColumnField("string", Default = "''")]
         [Required]
         public string Description { get; set; } = "";
-        [ColumnField("json", Default="{}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", Default = "{}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Metadata { get; set; } = "{}";
 
-        [ColumnField("bool", Default="false")]
+        [ColumnField("bool", Default = "false")]
         public bool IsRoot { get; set; }
 
         [ColumnField("reference(public.roles) on delete set null")]
         public int? RoleId { get; set; }
         public Role? Role { get; set; }
 
-        [ColumnField("bool", Default="true")]
+        [ColumnField("bool", Default = "true")]
         public bool IsEnabled { get; set; } = true;
     }
 
@@ -752,43 +752,43 @@ namespace OzmaDBSchema.System
     {
         public int Id { get; set; }
 
-        [ColumnField("int", IsImmutable=true, Default="-1")]
+        [ColumnField("int", IsImmutable = true, Default = "-1")]
         public int TransactionId { get; set; } = -1;
 
-        [ColumnField("datetime", IsImmutable=true)]
+        [ColumnField("datetime", IsImmutable = true)]
         public Instant TransactionTimestamp { get; set; }
 
-        [ColumnField("datetime", IsImmutable=true)]
+        [ColumnField("datetime", IsImmutable = true)]
         public Instant Timestamp { get; set; }
 
-        [ColumnField("string", IsImmutable=true)]
+        [ColumnField("string", IsImmutable = true)]
         [Required]
         public string Type { get; set; } = null!;
 
-        [ColumnField("string", IsImmutable=true)]
+        [ColumnField("string", IsImmutable = true)]
         public string? UserName { get; set; }
 
-        [ColumnField("json", IsImmutable=true, Default="{\"type\": 'api'}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", IsImmutable = true, Default = "{\"type\": 'api'}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Source { get; set; } = "{\"type\": \"api\"}";
 
-        [ColumnField("json", IsImmutable=true)]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", IsImmutable = true)]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Request { get; set; } = null!;
 
-        [ColumnField("json", IsImmutable=true)]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", IsImmutable = true)]
+        [Column(TypeName = "jsonb")]
         public string? Response { get; set; }
 
-        [ColumnField("json", Default="{}")]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", Default = "{}")]
+        [Column(TypeName = "jsonb")]
         [Required]
         public string Details { get; set; } = "{}";
 
-        [ColumnField("json", IsImmutable=true)]
-        [Column(TypeName="jsonb")]
+        [ColumnField("json", IsImmutable = true)]
+        [Column(TypeName = "jsonb")]
         public string? Error { get; set; }
-     }
+    }
 }

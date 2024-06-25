@@ -10,11 +10,13 @@ namespace OzmaDBSchema.Npgsql
     {
         public static Period Parse(string str)
         {
-            if (str == null) {
+            if (str == null)
+            {
                 throw new ArgumentNullException(nameof(str));
             }
             str = str.Replace('s', ' '); //Quick and easy way to catch plurals.
-            try {
+            try
+            {
                 var years = 0;
                 var months = 0;
                 var days = 0;
@@ -22,39 +24,44 @@ namespace OzmaDBSchema.Npgsql
                 var minutes = 0;
                 var seconds = 0m;
                 var idx = str.IndexOf("year", StringComparison.Ordinal);
-                if (idx > 0) {
+                if (idx > 0)
+                {
                     years = int.Parse(str.Substring(0, idx));
                     str = SafeSubstring(str, idx + 5);
                 }
                 idx = str.IndexOf("mon", StringComparison.Ordinal);
-                if (idx > 0) {
+                if (idx > 0)
+                {
                     months = int.Parse(str.Substring(0, idx));
                     str = SafeSubstring(str, idx + 4);
                 }
                 idx = str.IndexOf("day", StringComparison.Ordinal);
-                if (idx > 0) {
+                if (idx > 0)
+                {
                     days = int.Parse(str.Substring(0, idx));
                     str = SafeSubstring(str, idx + 4).Trim();
                 }
-                if (str.Length > 0) {
+                if (str.Length > 0)
+                {
                     var isNegative = str[0] == '-';
                     var parts = str.Split(':');
                     switch (parts.Length) //One of those times that fall-through would actually be good.
                     {
-                    case 1:
-                        hours = int.Parse(parts[0]);
-                        break;
-                    case 2:
-                        hours = int.Parse(parts[0]);
-                        minutes = int.Parse(parts[1]);
-                        break;
-                    default:
-                        hours = int.Parse(parts[0]);
-                        minutes = int.Parse(parts[1]);
-                        seconds = decimal.Parse(parts[2], CultureInfo.InvariantCulture.NumberFormat);
-                        break;
+                        case 1:
+                            hours = int.Parse(parts[0]);
+                            break;
+                        case 2:
+                            hours = int.Parse(parts[0]);
+                            minutes = int.Parse(parts[1]);
+                            break;
+                        default:
+                            hours = int.Parse(parts[0]);
+                            minutes = int.Parse(parts[1]);
+                            seconds = decimal.Parse(parts[2], CultureInfo.InvariantCulture.NumberFormat);
+                            break;
                     }
-                    if (isNegative) {
+                    if (isNegative)
+                    {
                         minutes *= -1;
                         seconds *= -1;
                     }
@@ -68,9 +75,13 @@ namespace OzmaDBSchema.Npgsql
                     Ticks = ticks
                 };
                 return builder.Build();
-            } catch (OverflowException) {
+            }
+            catch (OverflowException)
+            {
                 throw;
-            } catch (Exception) {
+            }
+            catch (Exception)
+            {
                 throw new FormatException();
             }
         }
@@ -85,10 +96,13 @@ namespace OzmaDBSchema.Npgsql
 
         public static bool TryParse(string str, out Period result)
         {
-            try {
+            try
+            {
                 result = Parse(str);
                 return true;
-            } catch (Exception) {
+            }
+            catch (Exception)
+            {
                 result = Period.Zero;
                 return false;
             }
@@ -98,16 +112,20 @@ namespace OzmaDBSchema.Npgsql
         {
             var sb = new StringBuilder();
             bool isNegative = period.Months < 0;
-            if (period.Months != 0) {
+            if (period.Months != 0)
+            {
                 sb.Append(period.Months).Append(Math.Abs(period.Months) == 1 ? " mon " : " mons ");
             }
-            if (period.Days != 0) {
-                if (period.Months < 0 && period.Days > 0) {
+            if (period.Days != 0)
+            {
+                if (period.Months < 0 && period.Days > 0)
+                {
                     sb.Append('+');
                 }
                 sb.Append(period.Days).Append(Math.Abs(period.Days) == 1 ? " day " : " days ");
             }
-            if (period.HasTimeComponent || sb.Length == 0) {
+            if (period.HasTimeComponent || sb.Length == 0)
+            {
                 var totalTicks =
                     period.Hours * TimeSpan.TicksPerHour +
                     period.Minutes * TimeSpan.TicksPerMinute +
@@ -115,9 +133,12 @@ namespace OzmaDBSchema.Npgsql
                     period.Milliseconds * TimeSpan.TicksPerMillisecond +
                     period.Ticks +
                     period.Nanoseconds / 100L;
-                if (totalTicks < 0) {
+                if (totalTicks < 0)
+                {
                     sb.Append('-');
-                } else if (period.Days < 0 || (period.Days == 0 && period.Months < 0)) {
+                }
+                else if (period.Days < 0 || (period.Days == 0 && period.Months < 0))
+                {
                     sb.Append('+');
                 }
                 totalTicks = Math.Abs(totalTicks);
