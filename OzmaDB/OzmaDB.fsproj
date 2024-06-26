@@ -12,6 +12,7 @@
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
 
+    <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
 

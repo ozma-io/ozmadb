@@ -18,11 +18,10 @@ jobs:
           dotnet restore --locked-mode -r linux-x64
       - name: Publish
         run: |
-          dotnet publish -o ozmadb -c Release -r linux-x64
-          tar -c ozmadb | xz > ozmadb.tar.xz
+          dotnet publish -o out/ozmadb -c Release -r linux-x64 OzmaDB/OzmaDB.fsproj
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ozmadb
           path: |
-            ozmadb/
+            out/ozmadb
