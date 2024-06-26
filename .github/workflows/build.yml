@@ -33,10 +33,10 @@ jobs:
           name: ozmadb
           path: |
             out/ozmadb
-      - name: Attest
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-path: out/ozmadb/**
+      # - name: Attest
+      #   uses: actions/attest-build-provenance@v1
+      #   with:
+      #     subject-path: out/ozmadb/**
 
   publish:
     name: Publish
@@ -77,9 +77,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-      - name: Attest
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-name: ozmaio/ozmadb
-          subject-digest: ${{ steps.push.outputs.digest }}
-          push-to-registry: true
+      # - name: Attest
+      #   uses: actions/attest-build-provenance@v1
+      #   with:
+      #     subject-name: ozmaio/ozmadb
+      #     subject-digest: ${{ steps.push.outputs.digest }}
+      #     push-to-registry: true
