@@ -3,11 +3,14 @@ on: push
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
     name: Build
+    permissions:
+      id-token: write
+      attestations: write
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
       artifact-url: ${{ steps.upload.outputs.artifact-url }}
+    runs-on: ubuntu-22.04
     steps:
       - name: Install .NET
         uses: actions/setup-dotnet@v4
@@ -35,12 +38,15 @@ jobs:
           subject-path: out/ozmadb/**
 
   publish:
-    runs-on: ubuntu-22.04
     name: Publish
-    needs: build
     if: github.repository == 'ozma-io/ozmadb' && github.ref == 'refs/heads/master'
+    needs: build
+    permissions:
+      id-token: write
+      attestations: write
     outputs:
       digest: ${{ steps.push.outputs.digest }}
+    runs-on: ubuntu-22.04
     steps:
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
