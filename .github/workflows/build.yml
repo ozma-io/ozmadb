@@ -37,6 +37,7 @@ jobs:
   publish:
     runs-on: ubuntu-22.04
     name: Publish
+    needs: build
     if: github.repository == 'ozma-io/ozmadb' && github.ref == 'refs/heads/master'
     outputs:
       digest: ${{ steps.push.outputs.digest }}
