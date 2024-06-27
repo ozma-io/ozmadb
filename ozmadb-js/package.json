@@ -7,11 +7,15 @@
     "build": "tsc",
     "lint": "eslint --ext .ts src/"
   },
-  "main": "./dist/index.js",
   "exports": {
     "./utils": "./dist/utils.js",
     "./types": "./dist/types.js",
-    "./client": "./dist/client/index.js",
+    "./client": "./dist/client/index.js"
+  },
+  "types": {
+    "./utils": "./dist/utils.d.ts",
+    "./types": "./dist/types.d.ts",
+    "./client": "./dist/client/index.d.ts",
     "./serverside/api": "./src/serverside/api.d.ts"
   },
   "devDependencies": {
