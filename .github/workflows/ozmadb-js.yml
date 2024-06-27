@@ -42,7 +42,7 @@ jobs:
         with:
           name: ozmadb-js
           path: |
-            ozmadb-js-*.tgz
+            ozmadb-js/ozmadb-js-*.tgz
       # - name: Attest
       #   uses: actions/attest-build-provenance@v1
       #   with:
@@ -78,4 +78,4 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          yarn publish ozmadb-js-*.tgz
+          yarn publish ozmadb-js/ozmadb-js-*.tgz
