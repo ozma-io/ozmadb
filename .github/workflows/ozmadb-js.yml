@@ -86,6 +86,6 @@ jobs:
           echo "Publishing version: $rel_version"
       - name: Publish to NPM
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           yarn publish --access public *.tgz
