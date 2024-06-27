@@ -117,6 +117,8 @@ jobs:
             echo "Tag doesn't correspond to the project version. Expected '$rel_version', got '$curr_version'." >&2
             exit 1
           fi
+          echo "Publishing version: $rel_version"
+
           cp --reflink=auto -ar out/ozmadb "ozmadb-$rel_version"
           tar -cJf "ozmadb-$rel_version.tar.xz" "ozmadb-$rel_version"
       - name: Publish release

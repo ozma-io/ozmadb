@@ -63,8 +63,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Install Dependencies
-        run: sudo apt-get install -y xmlstarlet
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 22.x
+          always-auth: true
       - name: Download Release
         uses: actions/download-artifact@v4
       - name: Check the version
@@ -77,8 +80,9 @@ jobs:
             echo "Tag doesn't correspond to the project version. Expected '$rel_version', got '$curr_version'." >&2
             exit 1
           fi
+          echo "Publishing version: $rel_version"
       - name: Publish to NPM
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           yarn publish ozmadb-js-*.tgz
