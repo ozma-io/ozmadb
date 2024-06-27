@@ -4,7 +4,7 @@
   "description": "ozma.io API client.",
   "license": "MIT",
   "scripts": {
-    "build": "tsc && rollup -c",
+    "build": "tsc",
     "lint": "eslint --ext .ts src/"
   },
   "main": "./dist/index.js",
@@ -13,7 +13,6 @@
     "./utils": "./dist/utils.js",
     "./types": "./dist/types.js",
     "./client": "./dist/client/index.js",
-    "./embedded": "./dist/embedded/index.js",
     "./serverside/api": "./src/serverside/api.d.ts"
   },
   "devDependencies": {
@@ -22,8 +21,6 @@
     "eslint": "^8.17.0",
     "eslint-config-airbnb-base": "^15.0.0",
     "eslint-plugin-import": "^2.20.2",
-    "rollup": "^2.75.6",
-    "rollup-plugin-terser": "^7.0.2",
     "typescript": "^4.1.3"
   }
 }
