@@ -9,7 +9,6 @@
   },
   "main": "./dist/index.js",
   "exports": {
-    ".": "./dist/index.js",
     "./utils": "./dist/utils.js",
     "./types": "./dist/types.js",
     "./client": "./dist/client/index.js",
