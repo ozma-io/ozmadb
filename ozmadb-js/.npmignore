@@ -1,0 +1,7 @@
+# https://github.com/yarnpkg/yarn/issues/3145
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Output of 'npm pack'
+*.tgz
