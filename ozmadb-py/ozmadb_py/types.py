@@ -233,8 +233,9 @@ class OzmaDBUserView(OzmaDBModel):
     allow_broken: bool = False
 
 
-class OzmaDBFullSavedSchema(OzmaDBSavedSchemaCustomEntities):
+class OzmaDBFullSavedSchema(OzmaDBModel):
     type: Literal["full"] = "full"
+    custom_entities: dict[SchemaName, dict[EntityName, list[Any]]] = Field(default_factory=dict)
     entities: dict[EntityName, OzmaDBEntity] = Field(default_factory=dict)
     # TODO: Type others.
     roles: dict[RoleName, Any] = Field(default_factory=dict)
@@ -495,7 +496,7 @@ class OzmaDBViewColumnField(OzmaDBModel):
     hasUpdateTriggers: bool
 
     @model_validator(mode="after")
-    def validate(self) -> "OzmaDBViewColumnField":
+    def _validate(self: "OzmaDBViewColumnField") -> "OzmaDBViewColumnField":
         if self.default_value is not None:
             self.default_value = ozmaql_value_from_raw(self.value_type, self.default_value)
         return self
@@ -534,7 +535,7 @@ class OzmaDBMappedAttributeInfo(OzmaDBBasicAttributeInfo):
     mapping: OzmaDBBoundMapping | None = None
 
     @model_validator(mode="after")
-    def _validate(self) -> "OzmaDBMappedAttributeInfo":
+    def _validate(self: "OzmaDBMappedAttributeInfo") -> "OzmaDBMappedAttributeInfo":
         if self.mapping is not None:
             self.mapping._convert_values(self.type)
         return self
@@ -579,7 +580,7 @@ class OzmaDBArgument(OzmaDBModel):
     attribute_types: dict[str, OzmaDBBoundAttributeInfo] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate(self) -> "OzmaDBArgument":
+    def _validate(self: "OzmaDBArgument") -> "OzmaDBArgument":
         arg_value_type = ozmadb_field_type_to_value(self.arg_type)
         if self.default_value is not None:
             self.default_value = ozmaql_value_from_raw(arg_value_type, self.default_value)
@@ -666,7 +667,7 @@ class OzmaDBViewExprResult(OzmaDBModel):
     result: OzmaDBExecutedViewExpr
 
     @model_validator(mode="after")
-    def _validate(self) -> "OzmaDBViewExprResult":
+    def _validate(self: "OzmaDBViewExprResult") -> "OzmaDBViewExprResult":
         self.result._convert_values(self.info)
         return self
 
@@ -678,7 +679,7 @@ class OzmaDBViewInfoResult(OzmaDBModel):
     const_argument_attributes: dict[ArgumentName, AttributesMap]
 
     @model_validator(mode="after")
-    def _validate(self) -> "OzmaDBViewInfoResult":
+    def _validate(self: "OzmaDBViewInfoResult") -> "OzmaDBViewInfoResult":
         for name, value in self.const_attributes.items():
             self.const_attributes[name] = ozmaql_value_from_raw(self.info.attribute_types[name].type, value)
         for column, attributes in zip(self.info.columns, self.const_column_attributes):
