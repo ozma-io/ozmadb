@@ -66,9 +66,9 @@ jobs:
         uses: actions/download-artifact@v4
       - name: Check the version
         env:
-          VERSION: ${{ github.ref }}
+          REF: ${{ github.ref }}
         run: |
-          rel_version=${VERSION#v}
+          rel_version=${REF#refs/tags/v}
           curr_version=$(jq -r .version ozmadb-js/package.json)
           if [ "$rel_version" != "$curr_version" ]; then
             echo "Tag doesn't correspond to the project version. Expected '$rel_version', got '$curr_version'." >&2

@@ -109,9 +109,9 @@ jobs:
           path: out/ozmadb
       - name: Make a Release Archive
         env:
-          VERSION: ${{ github.ref }}
+          REF: ${{ github.ref }}
         run: |
-          rel_version=${VERSION#v}
+          rel_version=${REF#refs/tags/v}
           curr_version=$(xmlstarlet sel -t -v '/Project/PropertyGroup/Version' OzmaDB/OzmaDB.fsproj)
           if [ "$rel_version" != "$curr_version" ]; then
             echo "Tag doesn't correspond to the project version. Expected '$rel_version', got '$curr_version'." >&2
