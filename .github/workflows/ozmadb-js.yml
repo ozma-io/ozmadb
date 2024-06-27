@@ -61,10 +61,10 @@ jobs:
       run:
         working-directory: ./ozmadb-js
     steps:
-      - name: Install Dependencies
-        run: sudo apt-get install -y xmlstarlet
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: sudo apt-get install -y xmlstarlet
       - name: Download Release
         uses: actions/download-artifact@v4
       - name: Check the version
