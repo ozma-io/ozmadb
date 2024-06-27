@@ -20,6 +20,10 @@ jobs:
         with:
           dotnet-version: 8.0.x
           cache: true
+          cache-dependency-path: |
+            OzmaUtils/packages.lock.json
+            OzmaDBSchema/packages.lock.json
+            OzmaDB/packages.lock.json
       - name: Restore
         run: |
           dotnet restore --locked-mode -r linux-x64
