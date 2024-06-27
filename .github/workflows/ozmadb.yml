@@ -44,7 +44,7 @@ jobs:
 
   publish-docker:
     name: Publish Docker Image
-    if: github.repository == 'ozma-io/ozmadb' && github.ref == 'refs/heads/master'
+    if: github.repository == 'ozma-io/ozmadb' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/'))
     needs: build
     permissions:
       contents: read
