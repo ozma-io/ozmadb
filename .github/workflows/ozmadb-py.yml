@@ -61,6 +61,9 @@ jobs:
     name: Publish Release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ozmadb-py
     permissions:
       contents: write
       id-token: write
@@ -89,6 +92,3 @@ jobs:
           echo "Publishing version: $rel_version"
       - name: Publish package distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        environment:
-          name: pypi
-          url: https://pypi.org/p/ozmadb-py
