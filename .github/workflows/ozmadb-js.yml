@@ -23,6 +23,7 @@ jobs:
         with:
           node-version: 22.x
           cache: yarn
+          cache-dependency-path: ozmadb-js/yarn.lock
       - name: Install Dependencies
         run: |
           yarn
