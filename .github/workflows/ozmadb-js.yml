@@ -57,6 +57,9 @@ jobs:
       id-token: write
       attestations: write
     runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: ./ozmadb-js
     steps:
       - name: Install Dependencies
         run: sudo apt-get install -y xmlstarlet
@@ -69,7 +72,7 @@ jobs:
           REF: ${{ github.ref }}
         run: |
           rel_version=${REF#refs/tags/v}
-          curr_version=$(jq -r .version ozmadb-js/package.json)
+          curr_version=$(jq -r .version package.json)
           if [ "$rel_version" != "$curr_version" ]; then
             echo "Tag doesn't correspond to the project version. Expected '$rel_version', got '$curr_version'." >&2
             exit 1
@@ -78,4 +81,4 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          yarn publish ozmadb-js/ozmadb-js-*.tgz
+          yarn publish ozmadb-js-*.tgz
