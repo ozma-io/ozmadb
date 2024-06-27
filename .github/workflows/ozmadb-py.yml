@@ -50,8 +50,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ozmadb-py
-          path: |
-            ozmadb-py/dist
+          path: ozmadb-py/dist
       # - name: Attest
       #   uses: actions/attest-build-provenance@v1
       #   with:
@@ -79,6 +78,7 @@ jobs:
         uses: actions/download-artifact@v4
         with: 
           name: ozmadb-py
+          path: ozmadb-py/dist
       - name: Check the version
         env:
           REF: ${{ github.ref }}

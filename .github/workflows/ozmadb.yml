@@ -35,8 +35,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ozmadb
-          path: |
-            out/ozmadb
+          path: out/ozmadb
       # - name: Attest
       #   uses: actions/attest-build-provenance@v1
       #   with:
@@ -71,6 +70,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ozmadb
+          path: out/ozmadb
       - name: Build a Docker image
         id: push
         uses: docker/build-push-action@v6
@@ -103,6 +103,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ozmadb
+          path: out/ozmadb
       - name: Make a Release Archive
         env:
           REF: ${{ github.ref }}

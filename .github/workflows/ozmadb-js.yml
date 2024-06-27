@@ -41,8 +41,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ozmadb-js
-          path: |
-            ozmadb-js/ozmadb-js-*.tgz
+          path: ozmadb-js/ozmadb-js-*.tgz
       # - name: Attest
       #   uses: actions/attest-build-provenance@v1
       #   with:
@@ -72,6 +71,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ozmadb-js
+          path: ozmadb-js
       - name: Check the version
         env:
           REF: ${{ github.ref }}
