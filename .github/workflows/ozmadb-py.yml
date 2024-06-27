@@ -28,7 +28,7 @@ jobs:
         id: cached-poetry-dependencies
         uses: actions/cache@v4
         with:
-          path: .venv
+          path: ./.venv
           key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
       - name: Install Dependencies
         run: |
@@ -50,7 +50,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ozmadb-py
-          path: ozmadb-py/dist
+          path: ./ozmadb-py/dist/
+          if-no-files-found: error
       # - name: Attest
       #   uses: actions/attest-build-provenance@v1
       #   with:
@@ -78,7 +79,7 @@ jobs:
         uses: actions/download-artifact@v4
         with: 
           name: ozmadb-py
-          path: ozmadb-py/dist
+          path: ./ozmadb-py/dist
       - name: Check the version
         env:
           REF: ${{ github.ref }}

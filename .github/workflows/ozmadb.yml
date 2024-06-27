@@ -21,9 +21,9 @@ jobs:
           dotnet-version: 8.0.x
           cache: true
           cache-dependency-path: |
-            OzmaUtils/packages.lock.json
-            OzmaDBSchema/packages.lock.json
-            OzmaDB/packages.lock.json
+            ./OzmaUtils/packages.lock.json
+            ./OzmaDBSchema/packages.lock.json
+            ./OzmaDB/packages.lock.json
       - name: Restore
         run: |
           dotnet restore --locked-mode -r linux-x64
@@ -35,7 +35,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ozmadb
-          path: out/ozmadb
+          path: ./out/ozmadb/
+          if-no-files-found: error 
       # - name: Attest
       #   uses: actions/attest-build-provenance@v1
       #   with:
@@ -70,7 +71,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ozmadb
-          path: out/ozmadb
+          path: ./out/ozmadb
       - name: Build a Docker image
         id: push
         uses: docker/build-push-action@v6
@@ -103,7 +104,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ozmadb
-          path: out/ozmadb
+          path: ./out/ozmadb
       - name: Make a Release Archive
         env:
           REF: ${{ github.ref }}
@@ -122,5 +123,5 @@ jobs:
         uses: ghalactic/github-release-from-tag@v5
         with:
           assets: |
-            - path: ozmadb-*.tar.xz
+            - path: ./ozmadb-*.tar.xz
               label: Linux (x64)
