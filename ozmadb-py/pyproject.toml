@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ozmadb-py"
-version = "1.0"
+version = "0.0.1"
 description = "OzmaDB Python client"
 authors = ["Nikolay Amiantov <namiantov@ozma.io>"]
 
@@ -11,6 +11,10 @@ pydantic = ">= 2.5.3, < 3.0.0"
 pyjwt = ">= 2.8.0, < 3.0.0"
 cryptography = ">= 41.0.7"
 isodate = "^0.6.1"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.4.10"
+pyright = "^1.1.369"
 
 [build-system]
 requires = ["poetry-core"]

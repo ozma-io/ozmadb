@@ -70,6 +70,8 @@ jobs:
           always-auth: true
       - name: Download Release
         uses: actions/download-artifact@v4
+        with:
+          name: ozmadb-js
       - name: Check the version
         env:
           REF: ${{ github.ref }}

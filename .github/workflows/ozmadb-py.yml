@@ -24,7 +24,7 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
           installer-parallel: true
-      - name: Load cached venv
+      - name: Load Cached Venv
         id: cached-poetry-dependencies
         uses: actions/cache@v3
         with:
@@ -32,23 +32,26 @@ jobs:
           key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
       - name: Install Dependencies
         run: |
-          poetry install --no-interaction --no-root
+          poetry install --with=dev --no-interaction --no-root
+      - name: Check Formatting
+        run: |
+          poetry run ruff format --check .
       - name: Lint
         run: |
-          yarn lint --no-fix --max-warnings 0
+          poetry run ruff check .
+      - name: Typecheck
+        run: |
+          poetry run pyright
       - name: Build
         run: |
-          yarn build
-      - name: Pack
-        run: |
-          yarn pack
+          poetry build -f sdist
       - name: Upload Artifacts
         id: upload
         uses: actions/upload-artifact@v4
         with:
-          name: ozmadb-js
+          name: ozmadb-py
           path: |
-            ozmadb-js/ozmadb-js-*.tgz
+            ozmadb-py/dist
       # - name: Attest
       #   uses: actions/attest-build-provenance@v1
       #   with:
@@ -65,30 +68,27 @@ jobs:
     runs-on: ubuntu-22.04
     defaults:
       run:
-        working-directory: ./ozmadb-js
+        working-directory: ./ozmadb-py
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 22.x
-          always-auth: true
       - name: Download Release
         uses: actions/download-artifact@v4
+        with: 
+          name: ozmadb-py
       - name: Check the version
         env:
           REF: ${{ github.ref }}
         run: |
           rel_version=${REF#refs/tags/v}
-          curr_version=$(jq -r .version package.json)
+          curr_version=$(yq -r .tool.poetry.version pyproject.toml)
           if [ "$rel_version" != "$curr_version" ]; then
             echo "Tag doesn't correspond to the project version. Expected '$rel_version', got '$curr_version'." >&2
             exit 1
           fi
           echo "Publishing version: $rel_version"
-      - name: Publish to NPM
-        env:
-          NPM_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          yarn publish ozmadb-js-*.tgz
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        environment:
+          name: pypi
+          url: https://pypi.org/p/ozmadb-py

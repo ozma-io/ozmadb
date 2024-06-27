@@ -71,7 +71,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ozmadb
-          path: out/ozmadb
       - name: Build a Docker image
         id: push
         uses: docker/build-push-action@v6
@@ -98,21 +97,18 @@ jobs:
       attestations: write
     runs-on: ubuntu-22.04
     steps:
-      - name: Install Dependencies
-        run: sudo apt-get install -y xmlstarlet
       - name: Checkout
         uses: actions/checkout@v4
       - name: Download Release
         uses: actions/download-artifact@v4
         with:
           name: ozmadb
-          path: out/ozmadb
       - name: Make a Release Archive
         env:
           REF: ${{ github.ref }}
         run: |
           rel_version=${REF#refs/tags/v}
-          curr_version=$(xmlstarlet sel -t -v '/Project/PropertyGroup/Version' OzmaDB/OzmaDB.fsproj)
+          curr_version=$(yq -p xml -o json -r '.Project.PropertyGroup.Version' OzmaDB/OzmaDB.fsproj)
           if [ "$rel_version" != "$curr_version" ]; then
             echo "Tag doesn't correspond to the project version. Expected '$rel_version', got '$curr_version'." >&2
             exit 1
