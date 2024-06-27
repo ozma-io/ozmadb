@@ -112,7 +112,7 @@ jobs:
           VERSION: ${{ github.ref }}
         run: |
           rel_version=${VERSION#v}
-          curr_version-$(xmlstarlet sel -t -v '/Project/PropertyGroup/Version' OzmaDB/OzmaDB.fsproj)
+          curr_version=$(xmlstarlet sel -t -v '/Project/PropertyGroup/Version' OzmaDB/OzmaDB.fsproj)
           if [ "$rel_version" != "$curr_version" ]; then
             echo "Tag doesn't correspond to the project version. Expected '$rel_version', got '$curr_version'." >&2
             exit 1
