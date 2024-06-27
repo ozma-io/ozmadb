@@ -8,6 +8,7 @@ let
   env = pkgs.buildFHSUserEnv {
     name = "ozmadb";
     targetPkgs = pkgs: with pkgs; [
+      # OzmaDB
       dotnet
       zlib
       mono
@@ -16,11 +17,14 @@ let
       kerberos
       lldb
       openssl
-      openssl
+      # ozmadb-js
       nodejs
       yarn
+      # ozmadb-py
       poetry
       python
+      ruff
+      pyright
     ];
     extraOutputsToInstall = [ "dev" ];
     profile = ''

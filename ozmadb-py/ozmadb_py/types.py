@@ -98,7 +98,9 @@ def ozmaql_value_from_raw(t: "OzmaDBValueType", v: OzmaQLValue | RawOzmaQLValue)
         return _ozmaql_scalar_value_from_raw(t, v)
 
 
-OzmaQLValueArg = Annotated[OzmaQLValue | RawOzmaQLValue, PlainSerializer(ozmaql_value_to_raw, return_type=RawOzmaQLValue)]
+OzmaQLValueArg = Annotated[
+    OzmaQLValue | RawOzmaQLValue, PlainSerializer(ozmaql_value_to_raw, return_type=RawOzmaQLValue)
+]
 
 
 class OzmaDBModel(BaseModel, alias_generator=to_camel, populate_by_name=True, extra="ignore"):
