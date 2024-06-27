@@ -1,0 +1,6 @@
+config.json
+
+# Python gitignore
+
+*.py[cod]
+__pycache__/

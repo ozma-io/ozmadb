@@ -2,6 +2,8 @@
 
 let
   dotnet = pkgs.dotnet-sdk_8;
+  nodejs = pkgs.nodejs_22;
+  python = pkgs.python3;
 
   env = pkgs.buildFHSUserEnv {
     name = "ozmadb";
@@ -9,14 +11,16 @@ let
       dotnet
       zlib
       mono
-      gcc
-      gnumake
-      icu
       lttng-ust
       libunwind
       kerberos
       lldb
       openssl
+      openssl
+      nodejs
+      yarn
+      poetry
+      python
     ];
     extraOutputsToInstall = [ "dev" ];
     profile = ''
@@ -38,4 +42,3 @@ in pkgs.stdenv.mkDerivation {
   '';
   buildCommand = "exit 1";
 }
-

@@ -7,7 +7,7 @@ export declare const renderDate: (date : Date) => string;
 export declare const renderFunQLName: (name: string) => string;
 export declare const renderFunQLValue: (value: unknown) => string;
 
-export interface IFunDBAPI {
+export interface IOzmaDBAPI {
   getUserView: (source: UserViewSource, args?: Record<string, unknown>, chunk?: IQueryChunk) => Promise<IViewExprResult>;
   getUserViewInfo: (source: UserViewSource) => Promise<IViewInfoResult>;
   getEntityInfo: (ref: IEntityRef) => Promise<IEntity>;
@@ -26,9 +26,9 @@ export interface IFunDBAPI {
   cancelWith: (userData: any, message?: string) => any; // noreturn
 }
 
-export declare const FunDB: IFunDBAPI;
+export declare const OzmaDB: IOzmaDBAPI;
 
-export class FunDBError extends Error {
+export class OzmaDBError extends Error {
   constructor(body: ApiError);
 
   body: ApiError;

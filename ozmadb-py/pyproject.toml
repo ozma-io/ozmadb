@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "ozmadb-py"
+version = "1.0"
+description = "OzmaDB Python client"
+authors = ["Nikolay Amiantov <namiantov@ozma.io>"]
+
+[tool.poetry.dependencies]
+python = ">= 3.10"
+aiohttp = ">= 3.9.1, < 4.0.0"
+pydantic = ">= 2.5.3, < 3.0.0"
+pyjwt = ">= 2.8.0, < 3.0.0"
+cryptography = ">= 41.0.7"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 120

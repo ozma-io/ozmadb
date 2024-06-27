@@ -1,8 +1,8 @@
-import FunDBClient from "./client";
+import OzmaDBClient from "./client";
 
 export * from "../types";
 export * from "../utils";
 
 export * from "./client";
 
-export default FunDBClient;
+export default OzmaDBClient;

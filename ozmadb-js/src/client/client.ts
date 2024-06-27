@@ -65,7 +65,7 @@ export type ClientHttpError = CommonClientHttpError | INetworkFailureError;
 
 export type ClientApiError = ApiError | ClientHttpError;
 
-export class FunDBError extends Error {
+export class OzmaDBError extends Error {
   body: ClientApiError;
 
   constructor(body: ClientApiError) {
@@ -74,12 +74,12 @@ export class FunDBError extends Error {
   }
 }
 
-const fetchRawFunDB = async (input: RequestInfo, init?: RequestInit): Promise<Response> => {
+const fetchRawOzmaDB = async (input: RequestInfo, init?: RequestInit): Promise<Response> => {
   try {
     return await fetch(input, init);
   } catch (e) {
     if (e instanceof TypeError) {
-      throw new FunDBError({ error: "networkFailure", message: e.message });
+      throw new OzmaDBError({ error: "networkFailure", message: e.message });
     } else {
       throw e;
     }
@@ -204,16 +204,16 @@ export interface IRestoreSchemasOptions {
 }
 
 const commonHeaders = {
-  "X-FunDB-LongRunning": "hybrid",
+  "X-OzmaDB-LongRunning": "hybrid",
 };
 
-interface IFunDBRequestInit {
+interface IOzmaDBRequestInit {
   method?: string;
   headers?: Record<string, string>;
   body?: Blob | string;
 }
 
-export default class FunDBClient {
+export default class OzmaDBClient {
   apiUrl: string;
   token: null | string;
 
@@ -222,7 +222,7 @@ export default class FunDBClient {
     this.token = opts.token ?? null;
   }
 
-  private async fetchFunDB(url: string, opts?: IFunDBRequestInit): Promise<Response> {
+  private async fetchOzmaDB(url: string, opts?: IOzmaDBRequestInit): Promise<Response> {
     const headers: Record<string, string> = {
       ...commonHeaders,
       ...opts?.headers,
@@ -230,14 +230,14 @@ export default class FunDBClient {
     if (this.token !== null) {
       headers["Authorization"] = `Bearer ${this.token}`;
     }
-    const response = await fetchRawFunDB(url, { ...opts, headers });
+    const response = await fetchRawOzmaDB(url, { ...opts, headers });
     if (!response.ok) {
       const body = await response.json() as ClientRawApiError;
       if (body.error === "notFinished") {
         let jobId = body.id;
         while (true) {
           // eslint-disable-next-line no-await-in-loop
-          const newResponse = await this.fetchFunDB(
+          const newResponse = await this.fetchOzmaDB(
             `${this.apiUrl}/jobs/${jobId}/result`,
             {
               headers: this.token === null ? undefined : {
@@ -251,27 +251,27 @@ export default class FunDBClient {
             if (newBody.error === "notFinished") {
               jobId = newBody.id;
             } else {
-              throw new FunDBError(newBody);
+              throw new OzmaDBError(newBody);
             }
           } else {
             return newResponse;
           }
         }
       } else {
-        throw new FunDBError(body);
+        throw new OzmaDBError(body);
       }
     } else {
       return response;
     }
   }
 
-  private async fetchJson(url: string, opts?: IFunDBRequestInit): Promise<unknown> {
-    const response = await this.fetchFunDB(url, opts);
+  private async fetchJson(url: string, opts?: IOzmaDBRequestInit): Promise<unknown> {
+    const response = await this.fetchOzmaDB(url, opts);
     return response.json();
   }
 
   private async fetchGetFileApi(subUrl: string, accept: string): Promise<Blob> {
-    const response = await this.fetchFunDB(`${this.apiUrl}/${subUrl}`, {
+    const response = await this.fetchOzmaDB(`${this.apiUrl}/${subUrl}`, {
       method: "GET",
       headers: {
         "Accept": accept,
