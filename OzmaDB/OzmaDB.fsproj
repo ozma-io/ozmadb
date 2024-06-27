@@ -175,11 +175,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="funapp_migration.mjs" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="funapp_preload.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="../OzmaDBSchema/OzmaDBSchema.csproj" />
     <ProjectReference Include="../OzmaUtils/OzmaUtils.fsproj" />
 

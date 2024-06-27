@@ -250,12 +250,14 @@ let private isDebug =
 
 let private setupConfiguration (args: string[]) (webAppBuilder: WebApplicationBuilder) =
     // Configuration.
-    let configPath = args.[0]
+    let cwd = Directory.GetCurrentDirectory()
+    let configPath = POSIXPath.combine cwd args.[0]
 
     ignore
     <| webAppBuilder.Configuration
-        .SetBasePath(Directory.GetCurrentDirectory())
+        .SetBasePath(cwd)
         .AddJsonFile(configPath, false, isDebug)
+        .AddInMemoryCollection(seq { KeyValuePair("ConfigPath", configPath) })
         .AddEnvironmentVariables()
 
 let private setupLoggerConfiguration (configuration: LoggerConfiguration) =
@@ -361,13 +363,16 @@ let private setupEventLogger (webAppBuilder: WebApplicationBuilder) =
     <| services.AddHostedService(fun sp -> sp.GetRequiredService<EventLogger>())
 
 let private setupInstancesCache (webAppBuilder: WebApplicationBuilder) =
+    let configPath = webAppBuilder.Configuration.GetValue<string>("ConfigPath")
     let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
     let sourcePreload =
         match fundbSection.GetValue("Preloads") with
         | null -> emptySourcePreloadFile
-        | path -> readSourcePreload path
+        | relPath ->
+            let path = POSIXPath.combine (POSIXPath.dirName configPath) relPath
+            readSourcePreload path
 
     let preload = resolvePreload sourcePreload
 

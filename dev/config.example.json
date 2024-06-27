@@ -1,7 +1,6 @@
 {
   "url": "http://0.0.0.0:5000",
   "connectionString": "Host=localhost; Username=abbradar; Password=1",
-  "preloads": "funapp_preload.json",
   "authAuthority": "https://keycloak-dev.myprocessx.com/auth/realms/myprocessx-dev"
 }
 
