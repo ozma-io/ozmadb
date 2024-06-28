@@ -3,6 +3,9 @@ name = "ozmadb-py"
 version = "0.0.2"
 description = "OzmaDB Python client"
 authors = ["Nikolay Amiantov <namiantov@ozma.io>"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License"
+]
 
 [tool.poetry.dependencies]
 python = ">= 3.10"

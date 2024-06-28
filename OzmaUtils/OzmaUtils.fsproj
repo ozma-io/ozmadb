@@ -1,6 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
   </PropertyGroup>
