@@ -1,10 +1,21 @@
 [tool.poetry]
 name = "ozmadb-py"
 version = "0.0.2"
-description = "OzmaDB Python client"
+description = "Python client library for interacting with the OzmaDB API"
 authors = ["Nikolay Amiantov <namiantov@ozma.io>"]
+license = "Apache-2.0"
+readme = "README.md"
+keywords = ["ozmadb", "database", "database-client", "python", "client"]
+repository = "https://github.com/ozma-io/ozmadb"
+homepage = "https://ozma.io/"
 classifiers = [
-  "License :: OSI Approved :: Apache Software License"
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
 ]
 
 [tool.poetry.dependencies]
