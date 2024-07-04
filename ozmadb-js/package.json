@@ -1,8 +1,22 @@
 {
   "name": "@ozma-io/ozmadb-js",
   "version": "0.0.2",
-  "description": "ozma.io API client.",
+  "description": "ozma.io API client",
+  "keywords": [
+    "ozma-io",
+    "ozmadb",
+    "database",
+    "api",
+    "client"
+  ],
+  "author": "ozma-io (https://ozma.io/)",
   "license": "Apache-2.0",
+  "homepage": "https://github.com/ozma-io/ozmadb",
+  "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ozma-io/ozmadb.git"
+  },
+  "type": "module",
   "scripts": {
     "build": "tsc",
     "lint": "eslint --ext .ts src/"
