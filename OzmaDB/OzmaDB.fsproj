@@ -180,6 +180,7 @@
     <ProjectReference Include="../OzmaDBSchema/OzmaDBSchema.csproj" />
     <ProjectReference Include="../OzmaUtils/OzmaUtils.fsproj" />
 
+    <PackageReference Update="FSharp.Core" Version="8.0.*" />
     <PackageReference Include="FSharpPlus" Version="1.6.*" />
     <PackageReference Include="Npgsql" Version="8.0.*" />
     <PackageReference Include="Npgsql.Json.NET" Version="8.0.*" />

@@ -36,6 +36,7 @@
     <Compile Include="src/Serialization/Yaml.fs" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Update="FSharp.Core" Version="8.0.*" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.*" />
     <PackageReference Include="YamlDotNet" Version="15.1.*" />
     <PackageReference Include="Ply" Version="0.3.*" />
