@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "ozmadb-py"
-version = "0.0.2"
+version = "0.0.3"
 description = "OzmaDB Python client"
 authors = ["Nikolay Amiantov <namiantov@ozma.io>"]
 classifiers = [
