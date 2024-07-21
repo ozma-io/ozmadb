@@ -229,12 +229,15 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
             with :? PostgresException when transaction.Connection.Connection.State = ConnectionState.Open ->
                 // Most likely we couldn't execute the statement itself because there is no "state" table yet.
                 do! (transaction :> IAsyncDisposable).DisposeAsync()
-                let transaction = new DatabaseTransaction(transaction.Connection)
+                let! transaction = DatabaseTransaction.Begin(transaction.Connection)
                 return (transaction, None)
         }
 
     let continueAndGetCurrentVersion (connection: DatabaseConnection) (cancellationToken: CancellationToken) =
-        getCurrentVersion (new DatabaseTransaction(connection)) cancellationToken
+        task {
+            let! transaction = DatabaseTransaction.Begin(connection)
+            return! getCurrentVersion transaction cancellationToken
+        }
 
     let openAndGetCurrentVersion (cancellationToken: CancellationToken) : Task<DatabaseTransaction * int option> =
         openAndCheckTransaction
@@ -749,7 +752,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                     }
         }
 
-    let rec getCachedState (cancellationToken: CancellationToken) : Task<DatabaseTransaction * CachedState> =
+    let rec getCachedState (cancellationToken: CancellationToken) : Task<DatabaseConnection * CachedState> =
         task {
             let! (transaction, ret) = openAndGetCurrentVersion cancellationToken
 
@@ -789,7 +792,8 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
 
                     return! getCachedState cancellationToken
                 else
-                    return (transaction, oldState)
+                    do! (transaction :> IAsyncDisposable).DisposeAsync()
+                    return (transaction.Connection, oldState)
             | (_, None)
             | (None, _) ->
                 let! _ =
@@ -815,7 +819,11 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
 
     member this.GetCache(initialCancellationToken: CancellationToken) =
         task {
-            let! (transaction, oldState) = getCachedState initialCancellationToken
+            // We get the cached state in a separate transaction to minimize locking.
+            // This can lead to races with database migrations, but it should only lead to
+            // rare errors and no permission issues.
+            let! (connection, oldState) = getCachedState initialCancellationToken
+            let! transaction = DatabaseTransaction.Begin(connection)
 
             try
                 let mutable isDisposed = false
@@ -1126,7 +1134,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
 
                             // We update state now and check user views _after_ that.
                             // At this point we are sure there is a valid versionEntry because GetCache should have been called.
-                            let newVersion = oldState.Version + 1
+                            let! newVersion = ensureAndGetVersion transaction true cancellationToken
 
                             let! _ =
                                 transaction.System.State

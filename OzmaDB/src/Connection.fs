@@ -76,8 +76,7 @@ let setupDbContextLogging (loggerFactory: ILoggerFactory) (builder: DbContextOpt
     ignore
     <| builder.UseLoggerFactory(loggerFactory).ConfigureWarnings(configureWarnings)
 
-type DatabaseTransaction(conn: DatabaseConnection, isolationLevel: IsolationLevel) =
-    let transaction = conn.Connection.BeginTransaction(isolationLevel)
+type DatabaseTransaction private (conn: DatabaseConnection, transaction: NpgsqlTransaction) =
     let logger = conn.LoggerFactory.CreateLogger<DatabaseTransaction>()
     let mutable lastNameId = 0
 
@@ -107,9 +106,14 @@ type DatabaseTransaction(conn: DatabaseConnection, isolationLevel: IsolationLeve
                 raise <| DeferredConstraintsException("", e, true)
         }
 
-    new(conn: DatabaseConnection) =
-        // FIXME: Maybe introduce more granular locking?
-        new DatabaseTransaction(conn, IsolationLevel.Serializable)
+    static member Begin(conn: DatabaseConnection) =
+        DatabaseTransaction.Begin(conn, IsolationLevel.Serializable)
+
+    static member Begin(conn: DatabaseConnection, isolationLevel: IsolationLevel) =
+        task {
+            let! transaction = conn.Connection.BeginTransactionAsync(isolationLevel)
+            return new DatabaseTransaction(conn, transaction)
+        }
 
     member this.Rollback() =
         unitVtask {
@@ -201,7 +205,7 @@ let openAndCheckTransaction
         task {
             let connection = new DatabaseConnection(loggerFactory, connectionString)
             do! connection.OpenAsync cancellationToken
-            let transaction = new DatabaseTransaction(connection, isolationLevel)
+            let! transaction = DatabaseTransaction.Begin(connection, isolationLevel)
 
             try
                 return! check transaction
