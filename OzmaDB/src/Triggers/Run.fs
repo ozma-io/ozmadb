@@ -8,6 +8,7 @@ open Newtonsoft.Json
 open OzmaDB.OzmaUtils
 open OzmaDB.OzmaUtils.Serialization.Utils
 open OzmaDB.Exception
+open OzmaDB.SQL.Query
 open OzmaDB.OzmaQL.AST
 open OzmaDB.OzmaQL.Arguments
 open OzmaDB.JavaScript.Json
@@ -47,6 +48,15 @@ type TriggerScript(engine: JSEngine, name: string, scriptSource: string) =
         with :? JavaScriptRuntimeException as e ->
             raisefUserWithInner TriggerRunException e ""
 
+    let runTrigger (args: obj array) (cancellationToken: CancellationToken) =
+        task {
+            try
+                return! engine.RunAsyncJSFunction(func, args, cancellationToken)
+            with
+            | IsConcurrentUpdateException e -> return raise e
+            | :? JavaScriptRuntimeException as e -> return raisefWithInner TriggerRunException e ""
+        }
+
     let runArgsTrigger
         (entity: ResolvedEntityRef)
         (source: SerializedTriggerSource)
@@ -62,17 +72,9 @@ type TriggerScript(engine: JSEngine, name: string, scriptSource: string) =
             let eventValue = engine.Json.Serialize(event)
             let oldArgs = engine.Json.Serialize(args)
 
-            let! newArgs =
-                task {
-                    try
-                        return! engine.RunAsyncJSFunction(func, [| eventValue; oldArgs |], cancellationToken)
-                    with :? JavaScriptRuntimeException as e ->
-                        return raisefWithInner TriggerRunException e ""
-                }
-
-            match newArgs with
+            match! runTrigger [| eventValue; oldArgs |] cancellationToken with
             | :? bool as ret -> return (if ret then ATUntouched else ATCancelled)
-            | _ ->
+            | newArgs ->
                 let ret =
                     try
                         V8JsonReader.Deserialize(newArgs)
@@ -106,11 +108,8 @@ type TriggerScript(engine: JSEngine, name: string, scriptSource: string) =
                     [| eventValue; oldArgs |]
                 | None -> [| eventValue |]
 
-            try
-                let! _ = engine.RunAsyncJSFunction(func, functionArgs, cancellationToken)
-                return ()
-            with :? JavaScriptRuntimeException as e ->
-                return raisefWithInner TriggerRunException e ""
+            let! _ = runTrigger functionArgs cancellationToken
+            return ()
         }
 
     member this.RunInsertTriggerBefore
@@ -141,15 +140,7 @@ type TriggerScript(engine: JSEngine, name: string, scriptSource: string) =
 
             let eventValue = engine.Json.Serialize(event)
 
-            let! maybeContinue =
-                task {
-                    try
-                        return! engine.RunAsyncJSFunction(func, [| eventValue |], cancellationToken)
-                    with :? JavaScriptRuntimeException as e ->
-                        return raisefWithInner TriggerRunException e ""
-                }
-
-            match maybeContinue with
+            match! runTrigger [| eventValue |] cancellationToken with
             | :? bool as b -> return b
             | v -> return raisef TriggerRunException "Invalid return value for trigger: %O" v
         }

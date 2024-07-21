@@ -36,6 +36,14 @@ type ConcurrentUpdateException(message: string, innerException: Exception) =
 
     new(message: string) = ConcurrentUpdateException(message, null)
 
+let rec getConcurrentUpdateException (e: exn) =
+    match e with
+    | :? ConcurrentUpdateException as e -> Some e
+    | e when not <| isNull e.InnerException -> getConcurrentUpdateException e.InnerException
+    | _ -> None
+
+let (|IsConcurrentUpdateException|_|) (e: exn) = getConcurrentUpdateException e
+
 type ExprParameters = Map<int, Value>
 
 let private parseType typeStr =

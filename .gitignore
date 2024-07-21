@@ -20,3 +20,5 @@ project.lock.json
 # Build results
 **/[Bb]in/
 **/[Oo]bj/
+
+.fake

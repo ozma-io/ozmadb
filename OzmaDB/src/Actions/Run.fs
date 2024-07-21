@@ -15,6 +15,7 @@ open OzmaDB.OzmaQL.AST
 open OzmaDB.JavaScript.Json
 open OzmaDB.JavaScript.Runtime
 open OzmaDB.Actions.Types
+open OzmaDB.SQL.Query
 
 type ActionRunException(message: string, innerException: exn, isUserException: bool) =
     inherit UserException(message, innerException, isUserException)
@@ -51,8 +52,9 @@ type ActionScript(engine: JSEngine, name: string, scriptSource: string) =
                         return Some result
                     with :? JsonReaderException as e ->
                         return raisefWithInner ActionRunException e ""
-            with :? JavaScriptRuntimeException as e ->
-                return raisefWithInner ActionRunException e ""
+            with
+            | IsConcurrentUpdateException e -> return raise e
+            | :? JavaScriptRuntimeException as e -> return raisefWithInner ActionRunException e ""
         }
 
     member this.Runtime = engine
