@@ -21,19 +21,23 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22.x
+          node-version: 18.x
           cache: yarn
           cache-dependency-path: ./ozmadb-js/yarn.lock
       - name: Install Dependencies
         run: |
-          yarn
+          yarn install --immutable
       - name: Lint
         run: |
           yarn lint --no-fix --max-warnings 0
       - name: Build
+        env:
+          NODE_ENV: production
         run: |
           yarn build
       - name: Pack
+        env:
+          NODE_ENV: production
         run: |
           yarn pack
       - name: Upload Artifacts
