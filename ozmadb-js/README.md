@@ -24,9 +24,11 @@ npm install @ozma-io/ozmadb-js
 
 ### Basic Example
 ```js
+import OzmaDBClient from "@ozma-io/ozmadb-js/client";
+
 async function exampleUsage() {
   try {
-    const userView = await OzmaDB.getNamedUserView({ schema: 'user', name: 'example_view' });
+    const userView = await OzmaDBClient.getNamedUserView({ schema: 'user', name: 'example_view' });
     console.log(userView);
   } catch (error) {
     if (error instanceof OzmaDBError) {
@@ -52,7 +54,7 @@ const ref = { schema: 'user', name: 'example_view' };
 const args = { archived: false };
 const opts = { chunk: { limit: 10, offset: 0 } };
 
-OzmaDB.getNamedUserView(ref, args, opts)
+OzmaDBClient.getNamedUserView(ref, args, opts)
   .then(view => console.log(view))
   .catch(error => console.error('Error fetching user view:', error));
 ```
@@ -71,7 +73,7 @@ const newCustomer = {
   active: true
 };
 
-OzmaDB.insertEntity(entityRef, newCustomer)
+OzmaDBClient.insertEntity(entityRef, newCustomer)
   .then(entityId => console.log('Inserted customer ID:', entityId))
   .catch(error => console.error('Error inserting customer:', error));
 ```
@@ -89,7 +91,7 @@ const updatedData = {
   email: 'john.new@example.com'
 };
 
-OzmaDB.updateEntity(entityRef, customerId, updatedData)
+OzmaDBClient.updateEntity(entityRef, customerId, updatedData)
   .then(entityId => console.log('Updated customer ID:', entityId))
   .catch(error => console.error('Error updating customer:', error));
 ```
@@ -103,7 +105,7 @@ Example:
 const entityRef = { schema: 'user', name: 'customers' };
 const customerId = 1; // assuming customer ID is 1
 
-OzmaDB.deleteEntity(entityRef, customerId)
+OzmaDBClient.deleteEntity(entityRef, customerId)
   .then(() => console.log('Customer deleted successfully.'))
   .catch(error => console.error('Error deleting customer:', error));
 ```
@@ -145,7 +147,7 @@ async function insertExample() {
   };
 
   try {
-    const entityId = await OzmaDB.insertEntity(entityRef, newProduct);
+    const entityId = await OzmaDBClient.insertEntity(entityRef, newProduct);
     console.log('Inserted product ID:', entityId);
   } catch (error) {
     console.error('Error inserting product:', error);
@@ -166,7 +168,7 @@ async function updateExample() {
   };
 
   try {
-    const entityId = await OzmaDB.updateEntity(entityRef, productId, updatedData);
+    const entityId = await OzmaDBClient.updateEntity(entityRef, productId, updatedData);
     console.log('Updated product ID:', entityId);
   } catch (error) {
     console.error('Error updating product:', error);
@@ -184,7 +186,7 @@ async function deleteExample() {
   const productId = 1; // assuming product ID is 1
 
   try {
-    await OzmaDB.deleteEntity(entityRef, productId);
+    await OzmaDBClient.deleteEntity(entityRef, productId);
     console.log('Product deleted successfully.');
   } catch (error) {
     console.error('Error deleting product:', error);
@@ -223,7 +225,7 @@ async function runTransactionExample() {
   };
 
   try {
-    const result = await OzmaDB.runTransaction(transaction);
+    const result = await OzmaDBClient.runTransaction(transaction);
     console.log('Transaction result:', result);
   } catch (error) {
     console.error('Error running transaction:', error);
@@ -243,7 +245,7 @@ async function getDomainValuesExample() {
   };
 
   try {
-    const domainValues = await OzmaDB.getDomainValues(fieldRef);
+    const domainValues = await OzmaDBClient.getDomainValues(fieldRef);
     console.log('Domain values:', domainValues);
   } catch (error) {
     console.error('Error fetching domain values:', error);
@@ -262,7 +264,7 @@ async function explainQueryExample() {
   const opts = { verbose: true };
 
   try {
-    const explanation = await OzmaDB.getAnonymousUserViewExplain(query, args, opts);
+    const explanation = await OzmaDBClient.getAnonymousUserViewExplain(query, args, opts);
     console.log('Query explanation:', explanation);
   } catch (error) {
     console.error('Error explaining query:', error);
