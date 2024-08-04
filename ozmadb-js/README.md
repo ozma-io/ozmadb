@@ -26,6 +26,8 @@ npm install @ozma-io/ozmadb-js
 ```js
 import OzmaDBClient from "@ozma-io/ozmadb-js/client";
 
+import OzmaDBClient from "@ozma-io/ozmadb-js/client";
+
 async function exampleUsage() {
   try {
     const userView = await OzmaDBClient.getNamedUserView({ schema: 'user', name: 'example_view' });
