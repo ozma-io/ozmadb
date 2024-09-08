@@ -13,8 +13,8 @@
   "license": "Apache-2.0",
   "homepage": "https://github.com/ozma-io/ozmadb",
   "repository": {
-        "type": "git",
-        "url": "git+https://github.com/ozma-io/ozmadb.git"
+    "type": "git",
+    "url": "git+https://github.com/ozma-io/ozmadb.git"
   },
   "type": "module",
   "scripts": {

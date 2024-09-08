@@ -19,7 +19,7 @@
         openssl
         # ozmadb-js
         nodejs
-        yarn
+        yarn-berry
         # ozmadb-py
         poetry
         python
