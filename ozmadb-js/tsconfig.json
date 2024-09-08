@@ -1,11 +1,11 @@
 {
   "compilerOptions": {
     "incremental": true,
-    "target": "es2020",
-    "module": "es2020",
+    "target": "es2022",
+    "module": "es2022",
     "declaration": true,
     "rootDir": "./src",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "outDir": "dist",
     "baseUrl": "./src",
     "paths": {
