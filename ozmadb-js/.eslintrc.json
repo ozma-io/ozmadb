@@ -15,9 +15,7 @@
     "sourceType": "module"
   },
   "ignorePatterns": ["dist/", "node_modules/"],
-  "plugins": [
-    "@typescript-eslint"
-  ],
+  "plugins": ["@typescript-eslint"],
   "rules": {
     "indent": "off",
     "@typescript-eslint/indent": "off",
@@ -26,9 +24,13 @@
     "@typescript-eslint/member-delimiter-style": "warn",
     "arrow-parens": ["warn", "as-needed"],
     "max-len": "off",
-    "quotes": ["error", "double", {
-      "allowTemplateLiterals": true
-    }],
+    "quotes": [
+      "error",
+      "double",
+      {
+        "allowTemplateLiterals": true
+      }
+    ],
     "no-restricted-globals": "off",
     "default-case": "off",
     "no-undef": "off",
@@ -59,25 +61,38 @@
     "spaced-comment": "warn",
     "space-in-parens": "warn",
     "no-trailing-spaces": "warn",
-    "brace-style": ["warn", "1tbs", {
-      "allowSingleLine": false
-    }],
+    "brace-style": [
+      "warn",
+      "1tbs",
+      {
+        "allowSingleLine": false
+      }
+    ],
     "object-curly-spacing": ["warn", "always"],
-    "object-curly-newline": ["warn", {
-      "consistent": true
-    }],
-    "object-property-newline": ["warn", {
-      "allowAllPropertiesOnSameLine": true
-    }],
+    "object-curly-newline": [
+      "warn",
+      {
+        "consistent": true
+      }
+    ],
+    "object-property-newline": [
+      "warn",
+      {
+        "allowAllPropertiesOnSameLine": true
+      }
+    ],
     "eqeqeq": "error",
     "import/first": "off",
     "import/no-unresolved": "off",
     "import/no-extraneous-dependencies": "off",
     "import/prefer-default-export": "off",
     "import/extensions": "off",
-    "no-console": ["warn", {
-      "allow": ["warn", "error", "trace", "assert"]
-    }],
+    "no-console": [
+      "warn",
+      {
+        "allow": ["warn", "error", "trace", "assert"]
+      }
+    ],
     "no-void": "off",
     "no-bitwise": "off",
     "no-continue": "off",

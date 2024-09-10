@@ -1,8 +1,8 @@
-import OzmaDBClient from "./client";
+import OzmaDBClient from './client'
 
-export * from "../types";
-export * from "../utils";
+export * from '../types'
+export * from '../utils'
 
-export * from "./client";
+export * from './client'
 
-export default OzmaDBClient;
+export default OzmaDBClient
