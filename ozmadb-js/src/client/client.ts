@@ -10,8 +10,6 @@ import {
   IActionResult,
   ArgumentName,
   IFieldRef,
-  IAccessDeniedError,
-  IRequestError,
   IDomainValuesResult,
   FieldName,
   IPermissionsInfo,

@@ -7,30 +7,20 @@
   "extends": [
     "airbnb-base",
     "plugin:@typescript-eslint/recommended",
-    "plugin:@typescript-eslint/recommended-requiring-type-checking"
+    "plugin:@typescript-eslint/recommended-requiring-type-checking",
+    "prettier"
   ],
   "parserOptions": {
     "parser": "@typescript-eslint/parser",
     "project": "tsconfig.json",
     "sourceType": "module"
   },
-  "ignorePatterns": ["dist/", "node_modules/"],
-  "plugins": ["@typescript-eslint"],
+  "ignorePatterns": ["dist/", "*.config.js", "node_modules/"],
+  "plugins": ["@typescript-eslint", "unused-imports"],
   "rules": {
     "indent": "off",
-    "@typescript-eslint/indent": "off",
     "semi": "off",
-    "@typescript-eslint/semi": "warn",
-    "@typescript-eslint/member-delimiter-style": "warn",
-    "arrow-parens": ["warn", "as-needed"],
     "max-len": "off",
-    "quotes": [
-      "error",
-      "double",
-      {
-        "allowTemplateLiterals": true
-      }
-    ],
     "no-restricted-globals": "off",
     "default-case": "off",
     "no-undef": "off",
@@ -56,37 +46,16 @@
     "no-param-reassign": "off",
     "nonblock-statement-body-position": "off",
     "operator-linebreak": "off",
-    "space-before-blocks": "warn",
-    "keyword-spacing": "warn",
     "spaced-comment": "warn",
-    "space-in-parens": "warn",
-    "no-trailing-spaces": "warn",
-    "brace-style": [
-      "warn",
-      "1tbs",
-      {
-        "allowSingleLine": false
-      }
-    ],
-    "object-curly-spacing": ["warn", "always"],
-    "object-curly-newline": [
-      "warn",
-      {
-        "consistent": true
-      }
-    ],
-    "object-property-newline": [
-      "warn",
-      {
-        "allowAllPropertiesOnSameLine": true
-      }
-    ],
+    "no-control-regex": "off",
     "eqeqeq": "error",
+    "global-require": "off",
     "import/first": "off",
     "import/no-unresolved": "off",
     "import/no-extraneous-dependencies": "off",
     "import/prefer-default-export": "off",
     "import/extensions": "off",
+    "unused-imports/no-unused-imports-ts": "warn",
     "no-console": [
       "warn",
       {
@@ -110,9 +79,20 @@
     "@typescript-eslint/no-unsafe-member-access": "off",
     "@typescript-eslint/no-unsafe-call": "off",
     "@typescript-eslint/ban-ts-comment": "off",
+    "@typescript-eslint/no-unnecessary-condition": "off",
     // Used for `require`-ing resources.
     "@typescript-eslint/no-var-requires": "off",
     "@typescript-eslint/restrict-template-expressions": "off",
-    "@typescript-eslint/no-empty-interface": "off"
+    "@typescript-eslint/no-empty-interface": "off",
+    // Buggy.
+    "@typescript-eslint/restrict-plus-operands": "off",
+    // Also buggy.
+    "@typescript-eslint/no-unsafe-argument": "off",
+    // Buggy too.
+    "@typescript-eslint/no-unnecessary-type-assertion": "off",
+    // Errors out on `$t` usage.
+    "@typescript-eslint/no-base-to-string": "off",
+    // Buggy.
+    "@typescript-eslint/no-redundant-type-constituents": "off"
   }
 }
