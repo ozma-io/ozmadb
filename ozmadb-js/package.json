@@ -20,7 +20,8 @@
   "scripts": {
     "build": "tsc",
     "lint": "eslint --ext .ts src/",
-    "prettier": "prettier -w ./"
+    "prettier": "prettier -w ./",
+    "check:prettier": "prettier -c ./"
   },
   "exports": {
     "./utils": "./dist/utils.js",
