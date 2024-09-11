@@ -30,7 +30,7 @@ jobs:
           yarn install --immutable
       - name: Check Formatting
         run: |
-          yarn check:prettier
+          yarn prettier -c
       - name: Lint
         run: |
           yarn lint --no-fix --max-warnings 0
