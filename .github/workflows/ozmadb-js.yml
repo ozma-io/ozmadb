@@ -26,7 +26,7 @@ jobs:
           cache-dependency-path: ./ozmadb-js/yarn.lock
       - name: Install Dependencies
         run: |
-          yarn set version latest
+          yarn set version stable
           yarn install --immutable
           echo "Dirs:"
           ls -lah
