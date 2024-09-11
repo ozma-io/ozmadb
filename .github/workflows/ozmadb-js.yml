@@ -27,6 +27,9 @@ jobs:
       - name: Install Dependencies
         run: |
           yarn install --immutable
+      - name: Check Formatting
+        run: |
+          yarn prettier -c
       - name: Lint
         run: |
           yarn lint --no-fix --max-warnings 0
