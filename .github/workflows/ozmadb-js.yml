@@ -28,9 +28,6 @@ jobs:
         run: |
           yarn set version stable
           yarn install --immutable
-          echo "Dirs:"
-          ls -lah
-          echo "All dirs" 
       - name: Check Formatting
         run: |
           yarn prettier -c
