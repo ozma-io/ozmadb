@@ -46,8 +46,7 @@ if ! [ -e /etc/ozmadb/config.json ]; then
           }
         }
       },
-      "ozmaDB": {
-        "preloads": (if $preload == "" then null else $preload end),
+      "ozmaDB": ({
         "authAuthority": $authAuthority,
         "allowAutoMark": true,
         "instancesSource": "static",
@@ -58,7 +57,7 @@ if ! [ -e /etc/ozmadb/config.json ]; then
           "password": $dbPassword,
           "database": $dbName
         }
-      }
+      } + (if $preload == "" then {} else {"preload": $preload} end))
     }' > /etc/ozmadb/config.json
 fi
 

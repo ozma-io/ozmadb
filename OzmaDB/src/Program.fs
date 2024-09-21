@@ -368,7 +368,7 @@ let private setupInstancesCache (webAppBuilder: WebApplicationBuilder) =
     let services = webAppBuilder.Services
 
     let sourcePreload =
-        match ozmadbSection.GetValue("Preloads") with
+        match ozmadbSection.GetValue("Preload") with
         | null -> emptySourcePreloadFile
         | relPath ->
             let path = POSIXPath.combine (POSIXPath.dirName configPath) relPath
