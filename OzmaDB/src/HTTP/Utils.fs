@@ -357,7 +357,7 @@ let private getUserTokenInfo (client: string) (email: string option) (ctx: HttpC
     let isGlobalAdmin =
         if not <| isNull userRoles then
             let roles = JsonConvert.DeserializeObject<RealmAccess> userRoles.Value
-            roles.Roles |> Seq.contains "fundb-admin"
+            roles.Roles |> Seq.contains "ozmadb-admin"
         else
             false
 

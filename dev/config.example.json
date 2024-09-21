@@ -6,7 +6,7 @@
       }
     }
   },
-  "funDB": {
+  "ozmaDB": {
     "preloads": "funapp_preload.json",
     "authAuthority": "https://account-dev.ozma.io/auth/realms/default",
     "allowAutoMark": true,

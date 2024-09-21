@@ -292,7 +292,7 @@ let private preludeSource =
 """
 
 let private preludeDoc =
-    let info = DocumentInfo("fundb_prelude.js", Category = ModuleCategory.Standard)
+    let info = DocumentInfo("ozmadb_prelude.js", Category = ModuleCategory.Standard)
     RuntimeLocal(fun runtime -> runtime.Runtime.Compile(info, preludeSource))
 
 [<DefaultScriptUsage(ScriptAccess.None)>]

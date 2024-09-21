@@ -288,7 +288,7 @@ let private setupLogging (webAppBuilder: WebApplicationBuilder) =
     ignore <| webAppBuilder.Host.UseSerilog(configureSerilog)
 
 let private setupAuthentication (webAppBuilder: WebApplicationBuilder) =
-    let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
+    let ozmadbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
     // Auth.
@@ -297,7 +297,7 @@ let private setupAuthentication (webAppBuilder: WebApplicationBuilder) =
         o.DefaultChallengeScheme <- JwtBearerDefaults.AuthenticationScheme
 
     let configureJwtBearer (cfg: JwtBearerOptions) =
-        cfg.Authority <- fundbSection.["AuthAuthority"]
+        cfg.Authority <- ozmadbSection.["AuthAuthority"]
         cfg.TokenValidationParameters <- TokenValidationParameters(ValidateAudience = false)
         cfg.Events <- JwtBearerEvents()
         // https://stackoverflow.com/questions/48649717/addjwtbearer-onauthenticationfailed-return-custom-error
@@ -311,17 +311,17 @@ let private setupAuthentication (webAppBuilder: WebApplicationBuilder) =
 
     ignore <| services.AddGiraffe().AddCors()
 
-    if not <| fundbSection.GetValue("DisableSecurity", false) then
+    if not <| ozmadbSection.GetValue("DisableSecurity", false) then
         ignore
         <| services
             .AddAuthentication(configureAuthentication)
             .AddJwtBearer(configureJwtBearer)
 
 let private setupRedis (webAppBuilder: WebApplicationBuilder) =
-    let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
+    let ozmadbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
-    match fundbSection.["Redis"] with
+    match ozmadbSection.["Redis"] with
     | null -> ()
     | redisStr ->
         let redisOptions = Redis.ConfigurationOptions.Parse(redisStr)
@@ -337,10 +337,10 @@ let private setupRedis (webAppBuilder: WebApplicationBuilder) =
         <| services.AddSingleton<Redis.IConnectionMultiplexer>(getRedisMultiplexer)
 
 let private setupRateLimiting (webAppBuilder: WebApplicationBuilder) =
-    let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
+    let ozmadbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
-    match fundbSection.["Redis"] with
+    match ozmadbSection.["Redis"] with
     | null -> ignore <| services.AddMemoryCache().AddInMemoryRateLimiting()
     | redisStr -> ignore <| services.AddRedisRateLimiting()
     // Needed for the strategy, but we ignore it in RateLimit.fs. Painful...
@@ -364,11 +364,11 @@ let private setupEventLogger (webAppBuilder: WebApplicationBuilder) =
 
 let private setupInstancesCache (webAppBuilder: WebApplicationBuilder) =
     let configPath = webAppBuilder.Configuration.GetValue<string>("ConfigPath")
-    let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
+    let ozmadbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
     let sourcePreload =
-        match fundbSection.GetValue("Preloads") with
+        match ozmadbSection.GetValue("Preloads") with
         | null -> emptySourcePreloadFile
         | relPath ->
             let path = POSIXPath.combine (POSIXPath.dirName configPath) relPath
@@ -381,25 +381,25 @@ let private setupInstancesCache (webAppBuilder: WebApplicationBuilder) =
             { Preload = preload
               LoggerFactory = sp.GetRequiredService<ILoggerFactory>()
               EventLogger = sp.GetRequiredService<EventLogger>()
-              AllowAutoMark = fundbSection.GetValue("AllowAutoMark", false) }
+              AllowAutoMark = ozmadbSection.GetValue("AllowAutoMark", false) }
 
         InstancesCacheStore cacheParams
 
     ignore <| services.AddSingleton<InstancesCacheStore>(makeInstancesStore)
 
 let private setupInstancesSource (webAppBuilder: WebApplicationBuilder) =
-    let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
+    let ozmadbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
     let getInstancesSource (sp: IServiceProvider) : IInstancesSource =
-        let homeRegion = Option.ofObj <| fundbSection.GetValue("HomeRegion", null)
+        let homeRegion = Option.ofObj <| ozmadbSection.GetValue("HomeRegion", null)
 
-        match fundbSection.["InstancesSource"] with
+        match ozmadbSection.["InstancesSource"] with
         | "database" ->
-            let instancesConnectionString = fundbSection.GetConnectionString("Instances")
+            let instancesConnectionString = ozmadbSection.GetConnectionString("Instances")
 
             let instancesReadOnlyConnectionString =
-                fundbSection.GetConnectionString("InstancesReadOnly")
+                ozmadbSection.GetConnectionString("InstancesReadOnly")
                 |> Option.ofObj
                 |> Option.defaultValue instancesConnectionString
 
@@ -416,7 +416,7 @@ let private setupInstancesSource (webAppBuilder: WebApplicationBuilder) =
             :> IInstancesSource
         | "static" ->
             let instance = Instance(Owner = "owner@example.com")
-            fundbSection.GetSection("Instance").Bind(instance)
+            ozmadbSection.GetSection("Instance").Bind(instance)
 
             if isNull instance.Database then
                 instance.Database <- instance.Username
@@ -427,10 +427,10 @@ let private setupInstancesSource (webAppBuilder: WebApplicationBuilder) =
     ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)
 
 let private setupHttpUtils (webAppBuilder: WebApplicationBuilder) =
-    let fundbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
+    let ozmadbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
-    ignore <| services.Configure<HttpJobSettings>(fundbSection.GetSection("Jobs"))
+    ignore <| services.Configure<HttpJobSettings>(ozmadbSection.GetSection("Jobs"))
     ignore <| services.AddSingleton<HttpJobUtils>()
 
 let private setupApp (app: IApplicationBuilder) =
