@@ -47,7 +47,7 @@ if ! [ -e /etc/ozmadb/config.json ]; then
         }
       },
       "funDB": {
-        "preloads": if $preload == "" then null else $preload,
+        "preloads": (if $preload == "" then null else $preload end),
         "authAuthority": $authAuthority,
         "allowAutoMark": true,
         "instancesSource": "static",
