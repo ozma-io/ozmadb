@@ -77,6 +77,9 @@ jobs:
         with:
           name: ozmadb
           path: ./out/ozmadb
+      - name: Fix permissions
+        run:
+          chmod +x out/ozmadb/OzmaDB
       - name: Build a Docker image
         id: push
         uses: docker/build-push-action@v6
@@ -122,6 +125,7 @@ jobs:
           fi
           echo "Publishing version: $rel_version"
 
+          chmod +x out/ozmadb/OzmaDB
           cp --reflink=auto -ar out/ozmadb "ozmadb-$rel_version"
           tar -cJf "ozmadb-$rel_version.tar.xz" "ozmadb-$rel_version"
       - name: Publish release
