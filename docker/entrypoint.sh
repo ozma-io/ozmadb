@@ -25,18 +25,40 @@ if ! [ -e /etc/ozmadb/config.json ]; then
     exit 1
   fi
 
+  if [ -z "$PRELOAD" ] && [ -e /etc/ozmadb/preload.json ]; then
+    PRELOAD=/etc/ozmadb/preload.json
+  fi
+
   mkdir -p /etc/ozmadb
   jq -n \
     --arg dbHost "$DB_HOST" \
-    --arg dbPort "$DB_PORT" \
+    --argjson dbPort "$DB_PORT" \
     --arg dbUser "$DB_USER" \
     --arg dbPassword "$DB_PASSWORD" \
     --arg dbName "$DB_NAME" \
     --arg authAuthority "$AUTH_AUTHORITY" \
+    --arg preload "$PRELOAD" \
     '{
-      url: "http://0.0.0.0:5000",
-      connectionString: "Host=\($dbHost); Port=\($dbPort); Username=\($dbUser); Password=\($dbPassword); Database=\($dbName)",
-      authAuthority: $authAuthority,
+      "kestrel": {
+        "endpoints": {
+          "http": {
+            "url": "http://0.0.0.0:5000"
+          }
+        }
+      },
+      "funDB": {
+        "preloads": if $preload == "" then null else $preload,
+        "authAuthority": $authAuthority,
+        "allowAutoMark": true,
+        "instancesSource": "static",
+        "instance": {
+          "host": $dbHost,
+          "port": $dbPort,
+          "username": $dbUser,
+          "password": $dbPassword,
+          "database": $dbName
+        }
+      }
     }' > /etc/ozmadb/config.json
 fi
 

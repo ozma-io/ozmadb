@@ -1,6 +1,20 @@
 {
-  "url": "http://0.0.0.0:5000",
-  "connectionString": "Host=localhost; Username=abbradar; Password=1",
-  "authAuthority": "https://keycloak-dev.myprocessx.com/auth/realms/myprocessx-dev"
+  "kestrel": {
+    "endpoints": {
+      "http": {
+        "url": "http://0.0.0.0:5000"
+      }
+    }
+  },
+  "funDB": {
+    "preloads": "funapp_preload.json",
+    "authAuthority": "https://account-dev.ozma.io/auth/realms/default",
+    "allowAutoMark": true,
+    "instancesSource": "static",
+    "instance": {
+      "host": "localhost",
+      "username": "ozmadb",
+      "password": "ozmadb"
+    }
+  }
 }
-
