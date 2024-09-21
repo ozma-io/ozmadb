@@ -1,4 +1,10 @@
 FROM ubuntu:24.04
 
+RUN apt-get update && apt-get install -y \
+  jq \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY out/ozmadb/ /opt/ozmadb
-CMD ["/opt/ozmadb/OzmaDB", "/etc/ozmadb/config.json"]
+COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
