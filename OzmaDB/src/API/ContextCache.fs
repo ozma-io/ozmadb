@@ -2,7 +2,6 @@
 
 open FSharpPlus
 open System
-open System.Security.Cryptography
 open System.Reflection
 open System.Data
 open System.IO
@@ -93,11 +92,8 @@ let private fallbackVersion = 0
 let private migrationLockNumber = 0
 let private migrationLockParams = Map.singleton 0 (SQL.VInt migrationLockNumber)
 
-let private assemblyHash =
-    lazy
-        use hasher = SHA1.Create()
-        use assembly = File.OpenRead(Assembly.GetExecutingAssembly().Location)
-        hasher.ComputeHash(assembly) |> Hash.sha1OfBytes |> String.hexBytes
+let private assemblyId =
+    Assembly.GetExecutingAssembly().ManifestModule.ModuleVersionId
 
 [<NoEquality; NoComparison>]
 type private CachedContext =
@@ -170,8 +166,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
         anonymousViewsCache.Clear()
         anonymousCommandsCache.Clear()
 
-    let currentDatabaseVersion =
-        sprintf "%s %s" (assemblyHash.Force()) cacheParams.Preload.Hash
+    let currentDatabaseVersion = sprintf "%O %s" assemblyId cacheParams.Preload.Hash
 
     let jsRuntimes =
         let policy =
