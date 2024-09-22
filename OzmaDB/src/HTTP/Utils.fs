@@ -52,7 +52,7 @@ type RequestErrorInfo =
     | [<CaseKey("canceled")>] RICanceled
     | [<CaseKey("noInstance")>] RINoInstance
     | [<CaseKey("invalidRegion")>] RIWrongRegion of Region: string
-    | [<CaseKey("unauthorized")>] RIUnauthorized
+    | [<CaseKey("unauthorized", IgnoreFields = [| "Details" |])>] RIUnauthorized of Details: string
     | [<CaseKey("accessDenied", IgnoreFields = [| "Details" |])>] RIAccessDenied of Details: string
     | [<CaseKey("concurrentUpdate")>] RIConcurrentUpdate
     | [<CaseKey("notFinished")>] RINotFinished of Id: JobId
@@ -69,7 +69,7 @@ type RequestErrorInfo =
         | RICanceled -> "The request has been canceled"
         | RINoInstance -> "Instance not found"
         | RIWrongRegion region -> sprintf "Wrong instance region, correct region: %s" region
-        | RIUnauthorized -> "Failed to authorize using the access token"
+        | RIUnauthorized msg -> msg
         | RIAccessDenied msg -> msg
         | RIConcurrentUpdate -> "Concurrent update detected; try again"
         | RINotFinished id -> "The background job has not yet finished"
@@ -92,7 +92,7 @@ type RequestErrorInfo =
         | RICanceled -> 400
         | RINoInstance -> 404
         | RIWrongRegion _ -> 422
-        | RIUnauthorized -> 401
+        | RIUnauthorized _ -> 401
         | RIAccessDenied _ -> 403
         | RIConcurrentUpdate -> 503
         | RINotFinished _ -> 500
