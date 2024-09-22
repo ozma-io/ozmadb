@@ -49,6 +49,11 @@ if ! [ -e /etc/ozmadb/config.json ]; then
           }
         }
       },
+      "serilog": {
+        "minimumLevel": {
+          "default": "Verbose"
+        }
+      },
       "ozmaDB": ({
         "authAuthority": $authAuthority,
         "authRequireHttpsMetadata": $authRequireHttpsMetadata,

@@ -8,7 +8,6 @@
     targetPkgs = pkgs:
       with pkgs; [
         alejandra
-        # OzmaDB
         dotnet
         zlib
         mono
@@ -17,14 +16,14 @@
         kerberos
         lldb
         openssl
-        # ozmadb-js
         nodejs
         yarn-berry
-        # ozmadb-py
         poetry
         python
         ruff
         pyright
+        # Required for vsdbg
+        icu
       ];
     extraOutputsToInstall = ["dev"];
     profile = ''
