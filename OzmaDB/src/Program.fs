@@ -24,6 +24,7 @@ open NodaTime
 open Npgsql
 open Serilog
 open Serilog.Events
+open Serilog.Settings.Configuration
 open Microsoft.Extensions.Logging
 open Prometheus
 open Prometheus.HttpMetrics
@@ -279,8 +280,13 @@ let private setupLogging (webAppBuilder: WebApplicationBuilder) =
         =
         setupLoggerConfiguration configuration
 
+        let options =
+            ConfigurationReaderOptions(typeof<ConsoleLoggerConfigurationExtensions>.Assembly)
+
         ignore
-        <| configuration.ReadFrom.Configuration(config).ReadFrom.Services(services)
+        <| configuration.ReadFrom
+            .Configuration(config, options)
+            .ReadFrom.Services(services)
 
         if not <| config.GetSection("Serilog").GetSection("WriteTo").Exists() then
             ignore <| configuration.WriteTo.Console()
