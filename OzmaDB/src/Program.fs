@@ -311,7 +311,6 @@ let private setupAuthentication (webAppBuilder: WebApplicationBuilder) =
                 ctx.HandleResponse()
                 ctx.Response.StatusCode <- StatusCodes.Status401Unauthorized
                 ctx.Response.ContentType <- "application/json"
-                ctx.Response.Headers.WWWAuthenticate <- JwtBearerDefaults.AuthenticationScheme
                 ctx.Response.WriteAsync(JsonConvert.SerializeObject(RIUnauthorized))
 
     ignore <| services.AddGiraffe().AddCors()
