@@ -38,7 +38,8 @@ if ! [ -e /etc/ozmadb/config.json ]; then
     --arg dbPassword "$DB_PASSWORD" \
     --arg dbName "$DB_NAME" \
     --arg authAuthority "$AUTH_AUTHORITY" \
-    --argjson authAuthorityRequireHttps "${AUTH_AUTHORITY_REQUIRE_HTTPS:-true}" \
+    --arg authMetadataAddress "$AUTH_METADATA_ADDRESS" \
+    --argjson authRequireHttpsMetadata "${AUTH_REQUIRE_HTTPS_METADATA:-true}" \
     --arg preload "$PRELOAD" \
     '{
       "kestrel": {
@@ -60,7 +61,8 @@ if ! [ -e /etc/ozmadb/config.json ]; then
           "password": $dbPassword,
           "database": $dbName
         }
-      } + (if $preload == "" then {} else {"preload": $preload} end))
+      } + (if $preload == "" then {} else {"preload": $preload} end)
+        + (if $authMetadataAddress == "" then {} else {"authMetadataAddress": $authMetadataAddress} end))
     }' > /etc/ozmadb/config.json
 fi
 
