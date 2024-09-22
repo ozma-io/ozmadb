@@ -38,6 +38,7 @@ if ! [ -e /etc/ozmadb/config.json ]; then
     --arg dbPassword "$DB_PASSWORD" \
     --arg dbName "$DB_NAME" \
     --arg authAuthority "$AUTH_AUTHORITY" \
+    --argjson authAuthorityRequireHttps "${AUTH_AUTHORITY_REQUIRE_HTTPS:-true}" \
     --arg preload "$PRELOAD" \
     '{
       "kestrel": {
@@ -49,6 +50,7 @@ if ! [ -e /etc/ozmadb/config.json ]; then
       },
       "ozmaDB": ({
         "authAuthority": $authAuthority,
+        "authAuthorityRequireHttps": $authAuthorityRequireHttps,
         "allowAutoMark": true,
         "instancesSource": "static",
         "instance": {
