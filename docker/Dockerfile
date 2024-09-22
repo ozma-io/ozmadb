@@ -7,4 +7,4 @@ RUN apt-get update && apt-get install -y \
 COPY out/ozmadb/ /opt/ozmadb
 COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+RUN ["/usr/local/bin/docker-entrypoint.sh"]
