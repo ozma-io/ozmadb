@@ -298,7 +298,9 @@ let private setupAuthentication (webAppBuilder: WebApplicationBuilder) =
 
     let configureJwtBearer (cfg: JwtBearerOptions) =
         cfg.Authority <- ozmadbSection.["AuthAuthority"]
-        cfg.RequireHttpsMetadata <- ozmadbSection.GetValue("AuthAuthorityRequireHttps", true)
+        // Can be null, then `Authority` is used.
+        cfg.MetadataAddress <- ozmadbSection.["AuthMetadataAddress"]
+        cfg.RequireHttpsMetadata <- ozmadbSection.GetValue("AuthRequireHttpsMetadata", true)
 
         cfg.TokenValidationParameters <-
             TokenValidationParameters(ValidateIssuer = false, ValidateAudience = false, ValidateIssuerSigningKey = true)
