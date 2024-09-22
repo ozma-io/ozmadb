@@ -241,12 +241,12 @@ let private appEndpoints (serviceProvider: IServiceProvider) : Endpoint list =
           permissionsApi serviceProvider
           domainsApi serviceProvider ]
 
-let private isDebug =
-#if DEBUG
+let private isDebug = true
+(*#if DEBUG
     true
 #else
     false
-#endif
+#endif*)
 
 let private setupConfiguration (args: string[]) (webAppBuilder: WebApplicationBuilder) =
     // Configuration.
@@ -299,6 +299,7 @@ let private setupAuthentication (webAppBuilder: WebApplicationBuilder) =
     let configureJwtBearer (cfg: JwtBearerOptions) =
         cfg.Authority <- ozmadbSection.["AuthAuthority"]
         cfg.RequireHttpsMetadata <- ozmadbSection.GetValue("AuthAuthorityRequireHttps", true)
+        cfg.IncludeErrorDetails <- isDebug
 
         cfg.TokenValidationParameters <-
             TokenValidationParameters(ValidateIssuer = false, ValidateAudience = false, ValidateIssuerSigningKey = true)
