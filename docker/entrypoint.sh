@@ -51,7 +51,7 @@ if ! [ -e /etc/ozmadb/config.json ]; then
       },
       "ozmaDB": ({
         "authAuthority": $authAuthority,
-        "authAuthorityRequireHttps": $authAuthorityRequireHttps,
+        "authRequireHttpsMetadata": $authRequireHttpsMetadata,
         "allowAutoMark": true,
         "instancesSource": "static",
         "instance": {
