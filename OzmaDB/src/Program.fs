@@ -299,7 +299,10 @@ let private setupAuthentication (webAppBuilder: WebApplicationBuilder) =
     let configureJwtBearer (cfg: JwtBearerOptions) =
         cfg.Authority <- ozmadbSection.["AuthAuthority"]
         cfg.RequireHttpsMetadata <- ozmadbSection.GetValue("AuthAuthorityRequireHttps", true)
-        cfg.TokenValidationParameters <- TokenValidationParameters(ValidateAudience = false)
+
+        cfg.TokenValidationParameters <-
+            TokenValidationParameters(ValidateIssuer = false, ValidateAudience = false, ValidateIssuerSigningKey = true)
+
         cfg.Events <- JwtBearerEvents()
         // https://stackoverflow.com/questions/48649717/addjwtbearer-onauthenticationfailed-return-custom-error
         cfg.Events.OnChallenge <-
