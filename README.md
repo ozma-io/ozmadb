@@ -1,4 +1,4 @@
-# OzmaDB - The Ultimate Open-Source Database Solution for Customizable Metadata
+# OzmaDB - REST-accessible SQL-like Database with Embedded JavaScript
 
 OzmaDB is the core database engine for the ozma.io platform. It provides robust features for query execution, data persistence, permission checking, and much more. One of the key principles of OzmaDB is its approach to customization: "all your metadata is also data."
 
