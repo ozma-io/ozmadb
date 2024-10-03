@@ -41,6 +41,7 @@ if ! [ -e /etc/ozmadb/config.json ]; then
     --arg authMetadataAddress "$AUTH_METADATA_ADDRESS" \
     --argjson authRequireHttpsMetadata "${AUTH_REQUIRE_HTTPS_METADATA:-true}" \
     --arg preload "$PRELOAD" \
+    --arg redis "$REDIS" \
     '{
       "kestrel": {
         "endpoints": {
@@ -67,7 +68,8 @@ if ! [ -e /etc/ozmadb/config.json ]; then
           "database": $dbName
         }
       } + (if $preload == "" then {} else {"preload": $preload} end)
-        + (if $authMetadataAddress == "" then {} else {"authMetadataAddress": $authMetadataAddress} end))
+        + (if $authMetadataAddress == "" then {} else {"authMetadataAddress": $authMetadataAddress} end)
+        + (if $redis == "" then {} else {"redis": $redis} end))
     }' > /etc/ozmadb/config.json
 fi
 

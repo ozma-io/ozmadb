@@ -7,13 +7,35 @@
     }
   },
   "ozmaDB": {
-    "authAuthority": "https://account-dev.ozma.io/auth/realms/default",
+    "authAuthority": "https://keycloak-host/auth/realms/default",
     "allowAutoMark": true,
+    // "preload": "path/to/preload.json",
+    // "redis": "redis-host:6379,password=password",
     "instancesSource": "static",
     "instance": {
       "host": "localhost",
       "username": "ozmadb",
-      "password": "ozmadb"
+      "password": "ozmadb",
+      // "maxUsers": 40,
+      // "readRateLimitsPerUser": [
+      //   {"period": 1, "limit": 50}
+      // ],
+      // "writeRateLimitsPerUser": [
+      //   {"period": 1, "limit": 50}
+      // ],
+      "disableSecurity": false,
+      "isTemplate": false
+    },
+    // Alternatively, if you want to use a database for instances.
+    // "instancesSource": "database",
+    // "connectionStrings": {
+    //   "instances": "Host=localhost; Database=instances",
+    //   Needed if you want to use a read-only replica for most requests.
+    //   "instancesReadOnly": "Host=localhost; Database=instances",
+    // },
+    "jobs": {
+      "remoteIdleTimeout": "00:00:10",
+      "hybridLocalTimeout": "00:00:25"
     }
   }
 }
