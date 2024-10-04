@@ -24,13 +24,15 @@ CREATE TABLE IF NOT EXISTS instances (
     disable_security bool NOT NULL DEFAULT false, -- Full access for anyone to all data (access control disabled). Deprecated.
 
     -- Quotas.
-    max_size int, -- In mibytes.
+    max_size int, -- In MiB
     max_request_time interval,
     max_users int,
     -- Array of objects (time in seconds):
     -- [{"period": 1, "limit": 2}, {"period": 15, "limit": 100}]
     read_rate_limits_per_user jsonb,
     write_rate_limits_per_user jsonb,
+    max_js_heap_size int, -- In MiB
+    max_js_stack_size int, -- In MiB
 
     -- Timestamps.
     created_at timestamptz NOT NULL DEFAULT now(),

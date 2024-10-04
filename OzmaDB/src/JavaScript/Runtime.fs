@@ -159,13 +159,42 @@ type private JSDocumentLoader(env: JSEnvironment) =
     // Ugh.
     member val CurrentModule: StringDocument option = None with get, set
 
-type JSRuntime(constraints: V8RuntimeConstraints) =
+[<NoComparison>]
+type JSRuntimeLimits =
+    { MaxHeapSize: int option
+      MaxStackSize: int option }
+
+let noJSRuntimeLimits =
+    { MaxHeapSize = None
+      MaxStackSize = None }
+
+type JSRuntime(limits: JSRuntimeLimits) =
+    let constraints =
+        new V8RuntimeConstraints(
+            MaxArrayBufferAllocation = 0UL,
+            HeapExpansionMultiplier = 2,
+            // We expect `HeapExpansionMultiplier` to keep us safe from crashes.
+            MaxOldSpaceSize = 2 * (Option.defaultValue 768 limits.MaxHeapSize)
+        )
+
     let runtime = new V8Runtime(constraints)
+
+    do
+        match limits.MaxHeapSize with
+        | Some maxHeapSize -> runtime.MaxHeapSize <- UIntPtr.CreateChecked maxHeapSize
+        | None -> ()
+
+        match limits.MaxStackSize with
+        | Some maxStackSize -> runtime.MaxStackUsage <- UIntPtr.CreateChecked maxStackSize
+        | None -> ()
+
     do runtime.EnableInterruptPropagation <- true
 
     let mutable metMemoryLimit = false
 
     member this.Runtime = runtime
+
+    member this.Limits = limits
 
     member this.SetMetMemoryLimit() = metMemoryLimit <- true
 

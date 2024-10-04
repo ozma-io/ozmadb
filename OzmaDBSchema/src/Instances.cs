@@ -41,7 +41,7 @@ namespace OzmaDBSchema.Instances
 
     public class RateLimit
     {
-        public int Period { get; set; } // secs
+        public int Period { get; set; } // In seconds
         public int Limit { get; set; }
     }
 
@@ -73,12 +73,14 @@ namespace OzmaDBSchema.Instances
 
         public Instant? AccessedAt { get; set; }
 
-        public int? MaxSize { get; set; }
+        public int? MaxSize { get; set; } // In MiB
         public int? MaxUsers { get; set; }
         public Duration? MaxRequestTime { get; set; }
         [Column(TypeName = "jsonb")]
         public List<RateLimit>? ReadRateLimitsPerUser { get; set; }
         [Column(TypeName = "jsonb")]
         public List<RateLimit>? WriteRateLimitsPerUser { get; set; }
+        public int? MaxJSHeapSize { get; set; } // In MiB
+        public int? MaxJSStackSize { get; set; } // In MiB
     }
 }

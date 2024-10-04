@@ -14,7 +14,6 @@ open Microsoft.Extensions.ObjectPool
 open FluidCaching
 open Npgsql
 open FSharp.Control.Tasks.Affine
-open Microsoft.ClearScript.V8
 
 open OzmaDBSchema.System
 open OzmaDB.OzmaUtils
@@ -168,26 +167,15 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
 
     let currentDatabaseVersion = sprintf "%O %s" assemblyId cacheParams.Preload.Hash
 
+    let mutable jsRuntimeParams = noJSRuntimeLimits
+
     let jsRuntimes =
         let policy =
             { new IPooledObjectPolicy<JSRuntime> with
-                member this.Create() =
-                    let maxHeapSize = 32 * 1024 * 1024
-                    let maxStackSize = 16 * 1024 * 1024
+                member this.Create() = JSRuntime jsRuntimeParams
 
-                    let constraints =
-                        new V8RuntimeConstraints(
-                            MaxArrayBufferAllocation = 0UL,
-                            HeapExpansionMultiplier = 2,
-                            MaxOldSpaceSize = maxHeapSize
-                        )
-
-                    let runtime = JSRuntime constraints
-                    runtime.Runtime.MaxHeapSize <- UIntPtr.CreateChecked maxHeapSize
-                    runtime.Runtime.MaxStackUsage <- UIntPtr.CreateChecked maxStackSize
-                    runtime
-
-                member this.Return runtime = not runtime.MetMemoryLimit }
+                member this.Return runtime =
+                    not runtime.MetMemoryLimit && runtime.Limits = jsRuntimeParams }
 
         DefaultObjectPool(policy, Environment.ProcessorCount)
 
@@ -811,6 +799,12 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
     member this.Preload = preload
     member this.EventLogger = cacheParams.EventLogger
     member this.ConnectionString = cacheParams.ConnectionString
+
+    member this.JSRuntimeParams
+        with get () = jsRuntimeParams
+        and set v =
+            if v <> jsRuntimeParams then
+                jsRuntimeParams <- v
 
     member this.GetCache(initialCancellationToken: CancellationToken) =
         task {

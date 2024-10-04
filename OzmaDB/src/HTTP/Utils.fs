@@ -307,6 +307,9 @@ type IInstance =
     abstract member ReadRateLimitsPerUser: RateLimit seq
     abstract member WriteRateLimitsPerUser: RateLimit seq
 
+    abstract member MaxJSHeapSize: int option // In MiB
+    abstract member MaxJSStackSize: int option // In MiB
+
     abstract member AccessedAt: Instant option
 
     abstract member UpdateAccessedAtAndDispose: Instant -> unit
@@ -664,6 +667,10 @@ type HttpJobUtils
                 instanceConnectionString ictx.Instance ictx.Source.SetExtraConnectionOptions
 
             let! cacheStore = instancesCache.GetContextCache(connectionString)
+
+            cacheStore.JSRuntimeParams <-
+                { MaxHeapSize = ictx.Instance.MaxJSHeapSize
+                  MaxStackSize = ictx.Instance.MaxJSStackSize }
             // We allow `GetCache` to work even if the request is interrupted;
             // most likely the cache will be needed soon.
             return! cacheStore.GetCache lifetime.ApplicationStopping

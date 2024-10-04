@@ -136,6 +136,9 @@ type private DatabaseInstances
                                 member this.ReadRateLimitsPerUser = parsedRead
                                 member this.WriteRateLimitsPerUser = parsedWrite
 
+                                member this.MaxJSHeapSize = Option.ofNullable instance.MaxJSHeapSize
+                                member this.MaxJSStackSize = Option.ofNullable instance.MaxJSStackSize
+
                                 member this.AccessedAt = Option.ofNullable instance.AccessedAt
 
                                 member this.UpdateAccessedAtAndDispose(newTime: Instant) =
@@ -221,6 +224,9 @@ type private StaticInstance(instance: Instance, homeRegion: string option) =
                     member this.MaxRequestTime = Option.ofNullable instance.MaxRequestTime
                     member this.ReadRateLimitsPerUser = parsedRead
                     member this.WriteRateLimitsPerUser = parsedWrite
+
+                    member this.MaxJSHeapSize = Option.ofNullable instance.MaxJSHeapSize
+                    member this.MaxJSStackSize = Option.ofNullable instance.MaxJSStackSize
 
                     member this.UpdateAccessedAtAndDispose newTime = ()
 
