@@ -214,8 +214,6 @@ let private preludeSource =
     """
     const engine = globalThis.engine;
     delete globalThis.engine;
-    const console = globalThis.console;
-    delete globalThis.console;
     // Can't delete `gc`; unset it this way instead.
     globalThis.gc = undefined;
 
@@ -316,8 +314,11 @@ let private preludeSource =
         }
     }
 
+    const prepareStackTraceFlags = {
+        inHostGetStackTrace: false,
+    };
+    globalThis.prepareStackTraceFlags = prepareStackTraceFlags;
     OldError.prepareStackTrace = (error, trace) => {
-        console.WriteLine("Preparing the stack trace");
         const errorString = errorToString.call(error);
         if (trace.length === 0) {
             return errorString;
@@ -325,7 +326,12 @@ let private preludeSource =
         trace = trace.filter(frame => {
             const fileName = frame.getFileName();
             // Hide the internals.
-            if (fileName === null || fileName === "V8ScriptEngine [internal]") {
+            if (fileName === null) {
+                return false;
+            }
+            // Okay, this is crazy: if we filter this frame, `engine.GetStackTrace()` breaks.
+            // So we set this flag before we call it and reset it back afterwards.
+            if (!prepareStackTraceFlags.inHostGetStackTrace && fileName === "V8ScriptEngine [internal]") {
                 return false;
             }
             const functionName = frame.getFunctionName();
@@ -375,7 +381,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         engine.EnableRuntimeInterruptPropagation <- true
         engine.DocumentSettings.Loader <- loader
         engine.AddHostObject("engine", HostItemFlags.PrivateAccess, this)
-        engine.AddHostType("console", typeof<Console>)
+        // engine.AddHostType("console", typeof<Console>)
         ignore <| engine.Evaluate(preludeDoc.GetValue(runtime))
 
     let jsonEngine = V8JsonEngine(engine)
@@ -394,10 +400,14 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
     let enrichedExceptionsMap =
         engine.Global.["enrichedExceptionsMap"] :?> IJavaScriptObject
 
+    let prepareStackTraceFlags =
+        engine.Global.["prepareStackTraceFlags"] :?> IJavaScriptObject
+
     do
         ignore <| engine.Global.DeleteProperty("WrappedHostException")
         ignore <| engine.Global.DeleteProperty("WrappedHostPromise")
         ignore <| engine.Global.DeleteProperty("enrichedExceptionsMap")
+        ignore <| engine.Global.DeleteProperty("prepareStackTraceFlags")
 
     let mutable currentJSExceptionsMap: IJavaScriptObject option = None
     let mutable interruptEDI: ExceptionDispatchInfo option = None
@@ -539,8 +549,6 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         if isNull pendingTasks.Value then
             raisef JavaScriptRuntimeException "Async functions are not allowed here"
 
-        let finish = TaskCompletionSource()
-
         let oldStack =
             if obj.ReferenceEquals(stackTracesStack.Value, null) then
                 []
@@ -548,10 +556,16 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                 stackTracesStack.Value
 
         stackTracesStack.Value <- stack :: oldStack
+
+        let finish = TaskCompletionSource()
         ignore <| pendingTasks.Value.Add(finish.Task)
         finish
 
     member this.InternalPopAsyncJob(finish: TaskCompletionSource) =
+        match stackTracesStack.Value with
+        | stack :: nextStack -> stackTracesStack.Value <- nextStack
+        | _ -> failwith "Unexpected: no recorded stack frames"
+
         ignore <| pendingTasks.Value.Remove(finish.Task)
         finish.SetResult()
 
@@ -562,9 +576,27 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         else
             seq {
                 yield stack
-                yield! stackTracesStack.Value
+                yield! Seq.truncate 1 stackTracesStack.Value
             }
             |> String.concat ",\n"
+
+    // These are used to test if the stack traces get enriched correctly.
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.Yield() =
+        this.WrapAsyncHostFunction(fun () ->
+            task {
+                do! Task.Yield()
+                return null
+            })
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member this.YieldAndRun(f: IJavaScriptObject) =
+        this.WrapAsyncHostFunction(fun () ->
+            task {
+                do! Task.Yield()
+                let! _ = this.RunAsyncJSFunction(f, [||])
+                return null
+            })
 
     member inline private this.EvaluateJS<'a>
         (cancellationToken: CancellationToken)
@@ -739,7 +771,13 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
             wrappedHostExceptionConstructor.Invoke(true, error)
 
     member this.WrapAsyncHostFunction(f: unit -> Task<'a>) =
-        let stack = engine.GetStackTrace()
+        prepareStackTraceFlags.SetProperty("inHostGetStackTrace", true)
+
+        let stack =
+            try
+                engine.GetStackTrace()
+            finally
+                prepareStackTraceFlags.SetProperty("inHostGetStackTrace", false)
 
         wrappedHostPromiseConstructor.Invoke(
             true,
@@ -748,36 +786,41 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                 <| unitTask {
                     let source = this.InternalPushAsyncJob(stack)
 
-                    try
-                        let! ret =
-                            task {
+                    let! ret =
+                        task {
+                            try
                                 try
                                     let! ret = f ()
                                     return Ok ret
                                 with e ->
                                     let jsExc = this.InternalHandleHostExceptionInJS e
                                     return Error jsExc
-                            }
+                            with e ->
+                                this.InternalPopAsyncJob(source)
+                                return reraise' e
+                        }
 
-                        ignore
-                        <| match ret with
-                           | Ok r -> resolve.InvokeAsFunction(r)
-                           | Error e -> reject.InvokeAsFunction(e)
-                    finally
-                        this.InternalPopAsyncJob(source)
+                    this.InternalPopAsyncJob(source)
+
+                    ignore
+                    <| match ret with
+                       | Ok r -> resolve.InvokeAsFunction(r)
+                       | Error e -> reject.InvokeAsFunction(e)
                 })
         )
 
-    member this.RunJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) =
+    member this.RunJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) : obj =
         if func.Engine <> engine then
             failwith "Function belongs to another engine"
 
         this.EvaluateJS cancellationToken <| fun () -> func.InvokeAsFunction(args)
 
-    member this.RunJSFunction(func: IJavaScriptObject, args: obj[]) =
+    member this.RunJSFunction(func: IJavaScriptObject, args: obj[]) : obj =
         this.RunJSFunction(func, args, CancellationToken.None)
 
-    member this.RunAsyncJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) =
+    member this.RunAsyncJSFunction
+        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
+        : Task<obj> =
         if func.Engine <> engine then
             failwith "Function belongs to another engine"
 
@@ -787,7 +830,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
             | :? Task<obj> as t -> t
             | ret -> Task.result (ret)
 
-    member this.RunAsyncJSFunction(func: IJavaScriptObject, args: obj[]) =
+    member this.RunAsyncJSFunction(func: IJavaScriptObject, args: obj[]) : Task<obj> =
         this.RunAsyncJSFunction(func, args, CancellationToken.None)
 
 // ClearScript doesn't allow you to set the `ScriptException` externally,
