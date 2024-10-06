@@ -381,12 +381,12 @@ let private setupEventLogger (webAppBuilder: WebApplicationBuilder) =
     <| services.AddHostedService(fun sp -> sp.GetRequiredService<EventLogger>())
 
 let private setupInstancesCache (webAppBuilder: WebApplicationBuilder) =
-    let configPath = webAppBuilder.Configuration.GetValue<string>("ConfigPath")
+    let configPath = webAppBuilder.Configuration.["ConfigPath"]
     let ozmadbSection = webAppBuilder.Configuration.GetSection("OzmaDB")
     let services = webAppBuilder.Services
 
     let sourcePreload =
-        match ozmadbSection.GetValue("Preload") with
+        match ozmadbSection.["Preload"] with
         | null -> emptySourcePreloadFile
         | relPath ->
             let path = POSIXPath.combine (POSIXPath.dirName configPath) relPath
@@ -410,7 +410,7 @@ let private setupInstancesSource (webAppBuilder: WebApplicationBuilder) =
     let services = webAppBuilder.Services
 
     let getInstancesSource (sp: IServiceProvider) : IInstancesSource =
-        let homeRegion = Option.ofObj <| ozmadbSection.GetValue("HomeRegion", null)
+        let homeRegion = Option.ofObj <| ozmadbSection.["HomeRegion"]
 
         match ozmadbSection.["InstancesSource"] with
         | "database" ->
