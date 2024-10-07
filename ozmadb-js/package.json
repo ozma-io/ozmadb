@@ -1,6 +1,6 @@
 {
   "name": "@ozma-io/ozmadb-js",
-  "version": "0.0.4",
+  "version": "0.0.8",
   "description": "ozma.io API client",
   "keywords": [
     "ozma-io",
