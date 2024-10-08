@@ -31,7 +31,7 @@ let inline loop (arg: 'arg) ([<InlineIfLambda>] f: 'arg -> Task<LoopResult<'arg,
     task {
         let mutable result = Unchecked.defaultof<'r>
         let mutable arg = arg
-        let mutable continueLoop = false
+        let mutable continueLoop = true
 
         while continueLoop do
             match! f arg with

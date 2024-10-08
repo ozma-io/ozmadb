@@ -83,7 +83,6 @@ type EventLogger(loggerFactory: ILoggerFactory) =
                     if totalChanged > 0 then
                         logger.LogInformation("Logged {count} events into databases", totalChanged)
         }
-        :> Task
 
     member this.WriteEvent(connectionString: string, entry: EventEntry) =
         if not <| chan.Writer.TryWrite((connectionString, entry)) then
