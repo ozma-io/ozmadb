@@ -6,7 +6,6 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.IO
 open StackExchange
-open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
 open Microsoft.Extensions.Logging
 
@@ -81,33 +80,29 @@ let private waitRemoteJob<'a>
         let subscr = remote.Settings.Multiplexer.GetSubscriber()
         let! queue = subscr.SubscribeAsync(jobChannel)
 
-        return!
-            Task.deferAsync (fun () -> queue.UnsubscribeAsync())
-            <| fun () ->
-                task {
-                    let conn = remote.Settings.Multiplexer.GetDatabase()
-                    let! rawResult = conn.StringGetSetExpiryAsync(jobKey, delay + remote.Settings.IdleTimeout)
+        use _ = Task.toDisposable queue.UnsubscribeAsync
+        let conn = remote.Settings.Multiplexer.GetDatabase()
+        let! rawResult = conn.StringGetSetExpiryAsync(jobKey, delay + remote.Settings.IdleTimeout)
 
-                    if rawResult.IsNull then
-                        return RJNotFound
-                    else if not rawResult.IsNullOrEmpty then
-                        return! parseRemoteResult remote conn rawResult cancellationToken
-                    else
-                        use newSource = new CancellationTokenSource()
-                        newSource.CancelAfter(delay)
-                        let cancelToken = cancellationToken.Register(fun () -> newSource.Cancel())
+        if rawResult.IsNull then
+            return RJNotFound
+        else if not rawResult.IsNullOrEmpty then
+            return! parseRemoteResult remote conn rawResult cancellationToken
+        else
+            use newSource = new CancellationTokenSource()
+            newSource.CancelAfter(delay)
+            let cancelToken = cancellationToken.Register(fun () -> newSource.Cancel())
 
-                        try
-                            try
-                                let! gotResult = queue.ReadAsync(newSource.Token)
-                                let! rawResult = conn.StringGetAsync(jobKey)
-                                return! parseRemoteResult remote conn rawResult cancellationToken
-                            with :? OperationCanceledException ->
-                                cancellationToken.ThrowIfCancellationRequested()
-                                return RJPending
-                        finally
-                            ignore <| cancelToken.Unregister()
-                }
+            try
+                try
+                    let! gotResult = queue.ReadAsync(newSource.Token)
+                    let! rawResult = conn.StringGetAsync(jobKey)
+                    return! parseRemoteResult remote conn rawResult cancellationToken
+                with :? OperationCanceledException ->
+                    cancellationToken.ThrowIfCancellationRequested()
+                    return RJPending
+            finally
+                ignore <| cancelToken.Unregister()
     }
 
 type JobDataWriter =
@@ -182,8 +177,9 @@ type LongRunningJob<'a>
     let runCleanupJob (remote: RemoteJobRef) (expireTime: TimeSpan) : Task =
         let jobKey = Redis.RedisKey(remoteJobName remote)
 
-        let rec loop (expireTime: TimeSpan) =
-            unitTask {
+        Task.loop expireTime
+        <| fun expireTime ->
+            task {
                 do! Task.Delay(expireTime, cancelSource.Token)
                 let conn = remote.Settings.Multiplexer.GetDatabase()
                 let! newExpireTime = conn.KeyTimeToLiveAsync(jobKey)
@@ -191,14 +187,14 @@ type LongRunningJob<'a>
                 if not newExpireTime.HasValue then
                     logger.LogInformation("Cancelling remote job {jobId}", remote.Id)
                     remoteCancel ()
+                    return Task.StopLoop()
                 else
-                    do! loop newExpireTime.Value
+                    return Task.NextLoop newExpireTime.Value
             }
+        :> Task
 
-        loop expireTime
-
-    let runSubmitJob (job: Task<'a * JobDataWriter>) (remote: RemoteJobRef) =
-        unitTask {
+    let runSubmitJob (job: Task<'a * JobDataWriter>) (remote: RemoteJobRef) : Task =
+        task {
             try
                 let conn = remote.Settings.Multiplexer.GetDatabase()
 

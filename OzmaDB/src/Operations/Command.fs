@@ -3,7 +3,6 @@ module OzmaDB.Operations.Command
 open System.Threading
 open System.Threading.Tasks
 open FSharpPlus
-open FSharp.Control.Tasks.Affine
 open System.Runtime.Serialization
 
 open OzmaDB.OzmaUtils
@@ -163,7 +162,7 @@ let executeCommand
     (rawArgs: RawArguments)
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         for (typ, entityRef) in getTriggeredEntities cmdExpr.Command.Expression do
             match triggers.FindEntity entityRef with
             | Some entityTriggers when hasTriggers typ entityTriggers.Before || hasTriggers typ entityTriggers.After ->

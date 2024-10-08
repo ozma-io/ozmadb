@@ -4,7 +4,6 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.FSharp.Quotations
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDBSchema.System
@@ -199,7 +198,7 @@ let private checkAllowedEntityName (ref: AllowedEntityRef) : Expr<RoleEntity -> 
     <@ fun allowed -> (%checkRole) allowed.Role && (%checkEntity) allowed.Entity @>
 
 let markBrokenPermissions (db: SystemContext) (roles: Permissions) (cancellationToken: CancellationToken) : Task =
-    unitTask {
+    task {
         let broken = findBrokenPermissions roles
 
         let roleChecks =

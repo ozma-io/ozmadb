@@ -7,7 +7,6 @@ open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.Affine
 open FSharpPlus
 open Microsoft.FSharp.Quotations
 
@@ -95,8 +94,8 @@ let private cascadeDeleteDeferred
     (connection: DatabaseTransaction)
     (deferredSet: DeferredDeleteSet)
     (cancellationToken: CancellationToken)
-    =
-    unitTask {
+    : Task =
+    task {
         if not <| Set.isEmpty deferredSet then
             do!
                 connection.DeferConstraints cancellationToken
@@ -122,8 +121,8 @@ let private cascadeDeleteDeferred
                                     None
                                     cancellationToken
 
-                            let deleteOne (entityRef: ResolvedEntityRef) (id: RowId) =
-                                unitTask {
+                            let deleteOne (entityRef: ResolvedEntityRef) (id: RowId) : Task =
+                                task {
                                     let! _ =
                                         deleteEntry
                                             connection.Connection.Query
@@ -214,8 +213,8 @@ let deleteSchemas
     (connection: DatabaseTransaction)
     (schemas: Set<SchemaName>)
     (cancellationToken: CancellationToken)
-    =
-    unitTask {
+    : Task =
+    task {
         let schemasArray = schemas |> Seq.map string |> Seq.toArray
 
         let! schemaIds =
@@ -266,7 +265,7 @@ let genericMarkBroken
     (checks: Expr<'a -> bool> seq)
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         let errors = Seq.cache checks
 
         if not <| Seq.isEmpty errors then

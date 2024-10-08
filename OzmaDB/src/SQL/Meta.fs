@@ -6,7 +6,6 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
 open Microsoft.Extensions.Logging
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDB.OzmaUtils.Parsing

@@ -2,7 +2,7 @@ module OzmaDB.OzmaUtils.IO
 
 open System
 open System.IO
-open FSharp.Control.Tasks.NonAffine
+open System.Threading.Tasks
 
 let getMemoryStreamMemory (stream: MemoryStream) =
     let length = stream.Seek(0L, SeekOrigin.Current)
@@ -52,12 +52,13 @@ type MaxLengthStream(stream: Stream, maxLength: int64) =
         result
 
     override this.ReadAsync(buffer, cancellationToken) =
-        vtask {
+        task {
             let! result = stream.ReadAsync(buffer, cancellationToken)
             length <- length + int64 result
             checkLength ()
             return result
         }
+        |> ValueTask<int>
 
     override this.ReadAsync(buffer, offset, count, cancellationToken) =
         task {

@@ -1,6 +1,5 @@
 module OzmaDB.API.Domains
 
-open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
 open System.Threading.Tasks
 open Newtonsoft.Json

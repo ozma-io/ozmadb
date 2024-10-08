@@ -2,12 +2,12 @@ module OzmaDB.HTTP.RateLimit
 
 open System
 open System.Collections.Generic
+open System.Threading.Tasks
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.Options
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Http
 open AspNetCoreRateLimit
-open FSharp.Control.Tasks.Affine
 open Giraffe
 
 open OzmaDB.OzmaUtils
@@ -122,8 +122,8 @@ type RateLimiter
         task {
             let mutable result = None
 
-            let delegateNext (ctx: HttpContext) =
-                unitTask {
+            let delegateNext (ctx: HttpContext) : Task =
+                task {
                     let! ret = next ctx
                     result <- ret
                 }

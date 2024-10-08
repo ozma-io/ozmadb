@@ -1,6 +1,7 @@
 open System
 open System.IO
 open System.Threading
+open System.Threading.Tasks
 open System.Collections.Generic
 open Newtonsoft.Json
 open Microsoft.AspNetCore.Http
@@ -12,7 +13,6 @@ open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Cors.Infrastructure
 open Microsoft.AspNetCore.Authentication
 open Microsoft.AspNetCore.Authentication.JwtBearer
-open FSharp.Control.Tasks.Affine
 open Microsoft.IdentityModel.Tokens
 open Microsoft.EntityFrameworkCore
 open AspNetCoreRateLimit
@@ -142,8 +142,8 @@ type private DatabaseInstances
                                 member this.AccessedAt = Option.ofNullable instance.AccessedAt
 
                                 member this.UpdateAccessedAtAndDispose(newTime: Instant) =
-                                    let updateJob () =
-                                        unitTask {
+                                    let updateJob () : Task =
+                                        task {
                                             try
                                                 use instances =
                                                     let builder = DbContextOptionsBuilder<InstancesContext>()

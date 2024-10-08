@@ -5,7 +5,6 @@ open System.Linq
 open System.Threading.Tasks
 open Microsoft.FSharp.Quotations
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDB.Operations.Update
@@ -102,7 +101,7 @@ let private checkModuleName (ref: ModuleRef) : Expr<Module -> bool> =
     <@ fun action -> (%checkSchema) action.Schema && action.Path = name @>
 
 let markBrokenModules (db: SystemContext) (modules: ResolvedModules) (cancellationToken: CancellationToken) : Task =
-    unitTask {
+    task {
         let checks = findBrokenModules modules |> Seq.map checkModuleName
         do! genericMarkBroken db.Modules checks cancellationToken
     }

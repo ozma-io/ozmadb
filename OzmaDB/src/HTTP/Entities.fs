@@ -1,7 +1,6 @@
 ﻿module OzmaDB.HTTP.Entities
 
 open System
-open FSharp.Control.Tasks.Affine
 open Giraffe
 open Giraffe.EndpointRouting
 open FSharpPlus

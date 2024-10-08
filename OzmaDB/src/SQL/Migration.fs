@@ -3,7 +3,6 @@ module OzmaDB.SQL.Migration
 open System.Threading
 open System.Threading.Tasks
 open FSharpPlus
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDB.SQL.AST
@@ -625,7 +624,7 @@ let planDatabaseMigration (fromMeta: DatabaseMeta) (toMeta: DatabaseMeta) : Migr
     |> Seq.toArray
 
 let migrateDatabase (query: QueryConnection) (plan: MigrationPlan) (cancellationToken: CancellationToken) : Task =
-    unitTask {
+    task {
         if not <| Array.isEmpty plan then
             for action in plan do
                 let! _ = query.ExecuteNonQuery (action.ToSQLString()) Map.empty cancellationToken

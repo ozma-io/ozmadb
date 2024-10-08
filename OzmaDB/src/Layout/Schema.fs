@@ -7,7 +7,6 @@ open System.Linq.Expressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json.Linq
 
 open OzmaDB.OzmaUtils
@@ -128,7 +127,7 @@ let buildSchemaLayout
             |> Seq.map (fun schema -> (OzmaQLName schema.Name, makeSourceSchema schema))
             |> Map.ofSeqUnique
 
-        return { Schemas = sourceSchemas }
+        return ({ Schemas = sourceSchemas }: SourceLayout)
     }
 
 let private applyHiddenLayoutSchemaData (sourceSchema: SourceSchema) (systemSchema: SourceSchema) : SourceSchema =

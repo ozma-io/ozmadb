@@ -6,7 +6,6 @@ open System.Linq.Expressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.Affine
 open Microsoft.FSharp.Reflection
 
 open OzmaDB.OzmaUtils
@@ -76,5 +75,5 @@ let buildSchemaTriggers
             |> Seq.map (fun schema -> (OzmaQLName schema.Name, makeSourceTriggersDatabase schema))
             |> Map.ofSeqUnique
 
-        return { Schemas = sourceSchemas }
+        return ({ Schemas = sourceSchemas }: SourceTriggers)
     }

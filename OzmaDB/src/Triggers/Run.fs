@@ -2,7 +2,6 @@ module OzmaDB.Triggers.Run
 
 open System.Threading
 open System.Threading.Tasks
-open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
 
 open OzmaDB.OzmaUtils
@@ -93,7 +92,7 @@ type TriggerScript(engine: JSEngine, name: string, scriptSource: string) =
         (args: LocalArgumentsMap option)
         (cancellationToken: CancellationToken)
         : Task =
-        unitTask {
+        task {
             let event =
                 { Entity = entity
                   Time = TTAfter

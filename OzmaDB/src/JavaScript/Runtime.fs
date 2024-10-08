@@ -6,7 +6,6 @@ open System.Threading.Tasks
 open System.Runtime.CompilerServices
 open System.Runtime.ExceptionServices
 open System.Collections.Generic
-open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open Microsoft.ClearScript
@@ -647,39 +646,39 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         : Task<'a> =
         task {
             let inline run () =
-                // We collect all the tasks that are spawned during the execution of this function,
-                // and make sure they all finish.
-                // This way we avoid leaking tasks that can even cross to the next evaluation.
-                let newPendingTasks = Collections.Generic.HashSet()
-                pendingTasks.Value <- newPendingTasks
+                task {
+                    // We collect all the tasks that are spawned during the execution of this function,
+                    // and make sure they all finish.
+                    // This way we avoid leaking tasks that can even cross to the next evaluation.
+                    let newPendingTasks = Collections.Generic.HashSet()
+                    pendingTasks.Value <- newPendingTasks
 
-                let inline finishPendingTasks () =
-                    unitTask {
-                        while newPendingTasks.Count > 0 do
-                            let task = newPendingTasks |> Seq.first |> Option.get
-                            do! task
-                    }
+                    use _ =
+                        Task.toDisposable
+                        <| fun () ->
+                            task {
+                                while newPendingTasks.Count > 0 do
+                                    let task = newPendingTasks |> Seq.first |> Option.get
+                                    do! task
+                            }
 
-                Task.deferAsync finishPendingTasks
-                <| fun () ->
-                    task {
+                    try
                         try
-                            try
-                                return! f ()
-                            with e ->
-                                this.InternalTryRestoreJSException e
-                                return reraise' e
-                        with
-                        | :? ScriptEngineException as e ->
-                            let jsExc =
-                                if e.IsFatal || isNull e.ScriptExceptionAsObject then
-                                    None
-                                else
-                                    Some(e.ScriptExceptionAsObject :?> IJavaScriptObject)
+                            return! f ()
+                        with e ->
+                            this.InternalTryRestoreJSException e
+                            return reraise' e
+                    with
+                    | :? ScriptEngineException as e ->
+                        let jsExc =
+                            if e.IsFatal || isNull e.ScriptExceptionAsObject then
+                                None
+                            else
+                                Some(e.ScriptExceptionAsObject :?> IJavaScriptObject)
 
-                            return raise <| wrapJSException e jsExc
-                        | :? JSException as e -> return raise <| wrapJSException e (Some e.Value)
-                    }
+                        return raise <| wrapJSException e jsExc
+                    | :? JSException as e -> return raise <| wrapJSException e (Some e.Value)
+                }
 
             match currentCancellationToken with
             | None ->
@@ -781,9 +780,9 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
         wrappedHostPromiseConstructor.Invoke(
             true,
-            Func<_, _, _>(fun (resolve: IJavaScriptObject) (reject: IJavaScriptObject) ->
+            Action<_, _>(fun (resolve: IJavaScriptObject) (reject: IJavaScriptObject) ->
                 ignore
-                <| unitTask {
+                <| task {
                     let source = this.InternalPushAsyncJob(stack)
 
                     let! ret =

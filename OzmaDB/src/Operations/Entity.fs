@@ -4,7 +4,6 @@ open FSharpPlus
 open System.Linq
 open System.Threading
 open System.Threading.Tasks
-open FSharp.Control.Tasks.Affine
 open System.Runtime.Serialization
 open Newtonsoft.Json.Linq
 
@@ -227,8 +226,8 @@ let private countAndThrow
     (arguments: QueryArguments)
     (argumentValues: ArgumentValuesMap)
     (cancellationToken: CancellationToken)
-    =
-    unitTask {
+    : Task =
+    task {
         if Option.isNone applyRole then
             raise <| EntityOperationException(EOEEntryNotFound)
         else
@@ -525,7 +524,7 @@ let private runCheckExpr
     (ids: RowId[])
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         let aggExpr = FEAggFunc(OzmaQLName "bool_and", AEAll [| checkExpr |])
 
         let idsPlaceholder = PLocal <| OzmaQLName "ids"
@@ -629,8 +628,8 @@ let resolveKey
     (comments: string option)
     (key: RowKey)
     (cancellationToken: CancellationToken)
-    : ValueTask<RowId> =
-    vtask {
+    : Task<RowId> =
+    task {
         match key with
         | RKPrimary id -> return id
         | RKAlt(name, args) ->
@@ -1256,28 +1255,27 @@ let iterDeleteReferences
     (f: ResolvedEntityRef -> RowId -> Task)
     (tree: ReferencesTree)
     : Task<Set<ReferencesRowIndex>> =
+    let mutable visited = Set.empty
+
+    let rec go deleteAction i =
+        task {
+            visited <- Set.add i visited
+            let node = tree.Nodes.[i]
+
+            for child in node.References do
+                match child.DeleteAction with
+                // Walk into CASCADE and NO ACTION nodes, as they are deleted explicitly (in NO ACTION case)
+                // or their children need to be inspected (in CASCADE case).
+                | RDACascade
+                | RDANoAction when not (Set.contains child.Row visited) -> do! go (Some child.DeleteAction) child.Row
+                | _ -> ()
+            // Don't explicitly delete CASCADE nodes.
+            match deleteAction with
+            | Some RDACascade -> ()
+            | _ -> do! f node.Entity node.Id
+        }
+
     task {
-        let mutable visited = Set.empty
-
-        let rec go deleteAction i =
-            unitTask {
-                visited <- Set.add i visited
-                let node = tree.Nodes.[i]
-
-                for child in node.References do
-                    match child.DeleteAction with
-                    // Walk into CASCADE and NO ACTION nodes, as they are deleted explicitly (in NO ACTION case)
-                    // or their children need to be inspected (in CASCADE case).
-                    | RDACascade
-                    | RDANoAction when not (Set.contains child.Row visited) ->
-                        do! go (Some child.DeleteAction) child.Row
-                    | _ -> ()
-                // Don't explicitly delete CASCADE nodes.
-                match deleteAction with
-                | Some RDACascade -> ()
-                | _ -> do! f node.Entity node.Id
-            }
-
         do! go None tree.Root
         return visited
     }
@@ -1293,67 +1291,67 @@ let getRelatedEntries
     (comments: string option)
     (cancellationToken: CancellationToken)
     : Task<ReferencesTree> =
+    let mutable processed = Map.empty
+    let mutable nodes = Map.empty
+    let mutable lastId = 0
+
+    let rec findOne (id: RowId) (entityRef: ResolvedEntityRef) (entity: ResolvedEntity) : Task<int> =
+        task {
+            let idx = lastId
+            processed <- Map.add (entity.Root, id) idx processed
+            lastId <- lastId + 1
+            let! referenceLists = entity.ReferencingFields |> Map.toSeq |> Seq.mapTask (findRelated entityRef id)
+
+            let node =
+                { Entity = entityRef
+                  Id = id
+                  References = referenceLists |> Seq.concat |> Seq.toArray }
+
+            nodes <- Map.add idx node nodes
+            return idx
+        }
+
+    and findRelated
+        (entityRef: ResolvedEntityRef)
+        (relatedId: RowId)
+        (refFieldRef: ResolvedFieldRef, deleteAction: ReferenceDeleteAction)
+        : Task<ReferencesChild seq> =
+        task {
+            if not <| filterFields entityRef relatedId refFieldRef then
+                return Seq.empty
+            else
+                let! related =
+                    getRelatedRowIds
+                        connection
+                        globalArgs
+                        layout
+                        applyRole
+                        refFieldRef
+                        relatedId
+                        comments
+                        cancellationToken
+
+                let getOne (id, subEntityRef) =
+                    task {
+                        let entity = layout.FindEntity subEntityRef |> Option.get
+
+                        let! idx =
+                            task {
+                                match Map.tryFind (entity.Root, id) processed with
+                                | Some idx -> return idx
+                                | None -> return! findOne id subEntityRef entity
+                            }
+
+                        return
+                            { Field = refFieldRef.Name
+                              Row = idx
+                              DeleteAction = deleteAction }
+                    }
+
+                return! Seq.mapTask getOne related
+        }
+
     task {
-        let mutable processed = Map.empty
-        let mutable nodes = Map.empty
-        let mutable lastId = 0
-
-        let rec findOne (id: RowId) (entityRef: ResolvedEntityRef) (entity: ResolvedEntity) : Task<int> =
-            task {
-                let idx = lastId
-                processed <- Map.add (entity.Root, id) idx processed
-                lastId <- lastId + 1
-                let! referenceLists = entity.ReferencingFields |> Map.toSeq |> Seq.mapTask (findRelated entityRef id)
-
-                let node =
-                    { Entity = entityRef
-                      Id = id
-                      References = referenceLists |> Seq.concat |> Seq.toArray }
-
-                nodes <- Map.add idx node nodes
-                return idx
-            }
-
-        and findRelated
-            (entityRef: ResolvedEntityRef)
-            (relatedId: RowId)
-            (refFieldRef: ResolvedFieldRef, deleteAction: ReferenceDeleteAction)
-            : Task<ReferencesChild seq> =
-            task {
-                if not <| filterFields entityRef relatedId refFieldRef then
-                    return Seq.empty
-                else
-                    let! related =
-                        getRelatedRowIds
-                            connection
-                            globalArgs
-                            layout
-                            applyRole
-                            refFieldRef
-                            relatedId
-                            comments
-                            cancellationToken
-
-                    let getOne (id, subEntityRef) =
-                        task {
-                            let entity = layout.FindEntity subEntityRef |> Option.get
-
-                            let! idx =
-                                task {
-                                    match Map.tryFind (entity.Root, id) processed with
-                                    | Some idx -> return idx
-                                    | None -> return! findOne id subEntityRef entity
-                                }
-
-                            return
-                                { Field = refFieldRef.Name
-                                  Row = idx
-                                  DeleteAction = deleteAction }
-                        }
-
-                    return! Seq.mapTask getOne related
-            }
-
         let! (id, subEntityRef) =
             getSubEntity connection globalArgs layout applyRole initialEntityRef key comments cancellationToken
 

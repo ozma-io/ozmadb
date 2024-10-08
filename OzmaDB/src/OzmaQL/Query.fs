@@ -6,7 +6,6 @@ open System.Threading
 open System.Threading.Tasks
 open System.Runtime.Serialization
 open FSharpPlus
-open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json.Linq
 open Npgsql
 
@@ -146,7 +145,7 @@ let setPragmas
     (pragmas: CompiledPragmasMap)
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         for KeyValue(name, v) in pragmas do
             let q =
                 { Parameter = name
@@ -163,7 +162,7 @@ let unsetPragmas
     (pragmas: CompiledPragmasMap)
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         for KeyValue(name, v) in pragmas do
             let q =
                 { Parameter = name

@@ -4,7 +4,6 @@ open FSharpPlus
 open Newtonsoft.Json.Linq
 open System.Threading
 open System.Threading.Tasks
-open FSharp.Control.Tasks.Affine
 open Microsoft.ClearScript
 open Newtonsoft.Json
 

@@ -5,7 +5,6 @@ open System.Threading.Tasks
 open System.Collections.Generic
 open System.Linq
 open FSharpPlus
-open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
 open Newtonsoft.Json
@@ -403,7 +402,7 @@ type EntitiesAPI(api: IOzmaDBAPI) =
                                         beforeTriggers
                                 with
                                 | Error(BEError e) -> return Error { Inner = e; Operation = i }
-                                | Error(BECancelled()) -> return Ok { Id = None }
+                                | Error(BECancelled()) -> return Ok({ Id = None }: InsertEntryResponse)
                                 | Ok args ->
                                     let comments = insertEntryComments req.Entity rctx.User.Effective.Type args
 
@@ -545,7 +544,7 @@ type EntitiesAPI(api: IOzmaDBAPI) =
                                     key
                                     ctx.CancellationToken
 
-                            return Ok { Id = id }
+                            return Ok({ Id = id }: UpdateEntryResponse)
                         else
                             let beforeTriggers =
                                 findMergedTriggersUpdate req.Entity TTBefore (Map.keys args) ctx.Triggers
@@ -557,7 +556,7 @@ type EntitiesAPI(api: IOzmaDBAPI) =
                                     beforeTriggers
                             with
                             | Error(BEError e) -> return Error e
-                            | Error(BECancelled id) -> return Ok { Id = id }
+                            | Error(BECancelled id) -> return Ok({ Id = id }: UpdateEntryResponse)
                             | Ok(key, args) ->
                                 let comments = updateEntryComments req.Entity rctx.User.Effective.Type key args
 
@@ -694,8 +693,8 @@ type EntitiesAPI(api: IOzmaDBAPI) =
             match! this.GetRelatedEntries { Entity = req.Entity; Id = req.Id } with
             | Error e -> return Error e
             | Ok tree ->
-                let deleteOne entityRef id =
-                    unitTask {
+                let deleteOne entityRef id : Task =
+                    task {
                         match!
                             this.DeleteEntry
                                 { Entity = entityRef

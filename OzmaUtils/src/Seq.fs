@@ -5,7 +5,6 @@ open System
 open System.Linq
 open System.Collections.Generic
 open System.Threading.Tasks
-open FSharp.Control.Tasks.Affine
 
 let inline mapMaybe (f: 'a -> 'b option) (s: seq<'a>) : seq<'b> =
     seq {
@@ -110,24 +109,13 @@ let areEqual (a: seq<'a>) (b: seq<'a>) : bool =
     Seq.compareWith (fun e1 e2 -> if e1 = e2 then 0 else -1) a b = 0
 
 let inline iterTask (f: 'a -> Task) (s: seq<'a>) : Task =
-    unitTask {
+    task {
         for a in s do
             do! f a
     }
 
 let inline mapTask (f: 'a -> Task<'b>) (s: seq<'a>) : Task<seq<'b>> =
     task {
-        let list = List<'b>()
-
-        for a in s do
-            let! b = f a
-            list.Add(b)
-
-        return list :> seq<'b>
-    }
-
-let inline mapValueTask (f: 'a -> ValueTask<'b>) (s: seq<'a>) : ValueTask<seq<'b>> =
-    vtask {
         let list = List<'b>()
 
         for a in s do

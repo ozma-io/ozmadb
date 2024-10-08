@@ -1,7 +1,6 @@
 module OzmaDB.HTTP.Domains
 
 open System
-open FSharp.Control.Tasks.Affine
 open Giraffe.EndpointRouting
 open Microsoft.Extensions.DependencyInjection
 

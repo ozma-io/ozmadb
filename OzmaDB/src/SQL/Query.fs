@@ -10,7 +10,6 @@ open Microsoft.Extensions.Logging
 open NodaTime
 open Npgsql
 open NpgsqlTypes
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils.Serialization.Json
 open OzmaDB.OzmaUtils
@@ -358,14 +357,15 @@ type QueryConnection(loggerFactory: ILoggerFactory, connection: NpgsqlConnection
                                     member this.DisposeAsync() = reader.DisposeAsync()
 
                                     member this.MoveNextAsync() =
-                                        vtask {
+                                        task {
                                             match! reader.ReadAsync(cancellationToken) with
                                             | false -> return false
                                             | true ->
                                                 let row = getRow ()
                                                 currentValue <- Some row
                                                 return true
-                                        } } }
+                                        }
+                                        |> ValueTask<bool> } }
 
                 let! ret = processFunc columns enumerable
                 return ret

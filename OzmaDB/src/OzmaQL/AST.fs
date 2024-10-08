@@ -8,7 +8,6 @@ open NodaTime
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open System.Runtime.Serialization
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDB.OzmaUtils.Reflection

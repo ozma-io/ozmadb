@@ -4,7 +4,6 @@ open System.Threading
 open System.Linq
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.Affine
 open Microsoft.FSharp.Quotations
 open System.Linq.Expressions
 
@@ -104,7 +103,7 @@ let private checkActionName (ref: ActionRef) : Expr<Action -> bool> =
     <@ fun action -> (%checkSchema) action.Schema && action.Name = name @>
 
 let markBrokenActions (db: SystemContext) (actions: PreparedActions) (cancellationToken: CancellationToken) : Task =
-    unitTask {
+    task {
         let checks = findBrokenActions actions |> Seq.map checkActionName
         do! genericMarkBroken db.Actions checks cancellationToken
     }

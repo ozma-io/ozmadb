@@ -6,7 +6,6 @@ open System.Linq.Expressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDB.Permissions.Source
@@ -84,5 +83,5 @@ let buildSchemaPermissions
             |> Seq.map (fun schema -> (OzmaQLName schema.Name, makeSourcePermissionsSchema schema))
             |> Map.ofSeqUnique
 
-        return { Schemas = sourceSchemas }
+        return ({ Schemas = sourceSchemas }: SourcePermissions)
     }

@@ -4,7 +4,6 @@ open System
 open System.Runtime.Serialization
 open Microsoft.Extensions.Logging
 open Microsoft.AspNetCore.Http
-open FSharp.Control.Tasks.Affine
 open System.Data
 open Npgsql
 open Giraffe

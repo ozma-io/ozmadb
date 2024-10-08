@@ -5,7 +5,6 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.FSharp.Quotations
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDBSchema.System
@@ -120,7 +119,7 @@ let private checkUserViewGeneratorSchema (schemaName: SchemaName) : Expr<UserVie
     <@ fun uvGen -> uvGen.Schema.Name = rawSchemaName @>
 
 let markBrokenUserViews (db: SystemContext) (uvs: PrefetchedUserViews) (cancellationToken: CancellationToken) : Task =
-    unitTask {
+    task {
         let broken = findBrokenUserViews uvs
 
         let genChecks =

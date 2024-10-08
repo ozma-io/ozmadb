@@ -9,7 +9,6 @@ open System.ComponentModel
 open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 open FSharpPlus
-open FSharp.Control.Tasks.Affine
 open System.Security.Cryptography
 
 open OzmaDB.OzmaUtils
@@ -323,8 +322,8 @@ let checkBrokenLayout
     (conn: DatabaseTransaction)
     (layout: Layout)
     (cancellationToken: CancellationToken)
-    =
-    unitTask {
+    : Task =
+    task {
         let mutable critical = false
 
         for KeyValue(schemaName, schema) in layout.Schemas do
@@ -369,8 +368,8 @@ let checkBrokenAttributes
     (conn: DatabaseTransaction)
     (attrs: DefaultAttributes)
     (cancellationToken: CancellationToken)
-    =
-    unitTask {
+    : Task =
+    task {
         let mutable critical = false
 
         for KeyValue(schemaName, schema) in attrs.Schemas do
@@ -421,8 +420,8 @@ let checkBrokenActions
     (conn: DatabaseTransaction)
     (actions: PreparedActions)
     (cancellationToken: CancellationToken)
-    =
-    unitTask {
+    : Task =
+    task {
         let mutable critical = false
 
         for KeyValue(schemaName, schema) in actions.Schemas do
@@ -463,8 +462,8 @@ let checkBrokenModules
     (conn: DatabaseTransaction)
     (modules: ResolvedModules)
     (cancellationToken: CancellationToken)
-    =
-    unitTask {
+    : Task =
+    task {
         let mutable critical = false
 
         for KeyValue(schemaName, schema) in modules.Schemas do
@@ -505,8 +504,8 @@ let checkBrokenTriggers
     (conn: DatabaseTransaction)
     (triggers: PreparedTriggers)
     (cancellationToken: CancellationToken)
-    =
-    unitTask {
+    : Task =
+    task {
         let mutable critical = false
 
         for KeyValue(schemaName, schema) in triggers.Schemas do
@@ -558,8 +557,8 @@ let checkBrokenUserViews
     (conn: DatabaseTransaction)
     (userViews: PrefetchedUserViews)
     (cancellationToken: CancellationToken)
-    =
-    unitTask {
+    : Task =
+    task {
         let mutable critical = false
 
         for KeyValue(schemaName, maybeSchema) in userViews.Schemas do
@@ -599,8 +598,8 @@ let checkBrokenPermissions
     (conn: DatabaseTransaction)
     (perms: Permissions)
     (cancellationToken: CancellationToken)
-    =
-    unitTask {
+    : Task =
+    task {
         let mutable critical = false
 
         for KeyValue(schemaName, schema) in perms.Schemas do

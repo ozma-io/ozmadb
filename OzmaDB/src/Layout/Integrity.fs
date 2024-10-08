@@ -3,7 +3,6 @@ module OzmaDB.Layout.Integrity
 open FSharpPlus
 open System.Threading
 open System.Threading.Tasks
-open FSharp.Control.Tasks.Affine
 open Newtonsoft.Json
 open System.Text
 open System.Data.HashFunction.CityHash
@@ -1365,7 +1364,7 @@ let private runIntegrityCheck
     (query: SQL.SelectExpr)
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         try
             match! conn.ExecuteValueQuery (query.ToSQLString()) Map.empty cancellationToken with
             | None -> ()
@@ -1383,7 +1382,7 @@ let checkAssertions
     (assertions: LayoutAssertions)
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         for columnOfType in assertions.ReferenceOfTypeAssertions do
             match compileReferenceOfTypeCheck layout columnOfType.FromField columnOfType.ToEntity with
             | None -> ()

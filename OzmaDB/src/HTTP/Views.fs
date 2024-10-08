@@ -5,7 +5,6 @@ open Newtonsoft.Json.Linq
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Http
 open Giraffe
-open FSharp.Control.Tasks.Affine
 open Giraffe.EndpointRouting
 
 open OzmaDB.OzmaUtils

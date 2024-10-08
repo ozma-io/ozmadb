@@ -5,8 +5,8 @@
       "FSharp.Core": {
         "type": "Direct",
         "requested": "[8.0.*, )",
-        "resolved": "8.0.400",
-        "contentHash": "kHMdDDmlZl98tujgHCmL8/HNH9VKbxsRMC9s7wbwr4noR40SSa5D4d00yF8cMK52s8jabVuiLLcrUw9r+PkKDQ=="
+        "resolved": "8.0.401",
+        "contentHash": "pvmquLrs82m8WqWB49Gj+hsmnWURkUbc++pJ0P2NdrEv1ZVVrhDNjSiFNP4wW4HiTowwaRhjiBc5IKNV35Vf/A=="
       },
       "FSharpPlus": {
         "type": "Direct",
@@ -23,26 +23,11 @@
         "resolved": "13.0.3",
         "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
       },
-      "Ply": {
-        "type": "Direct",
-        "requested": "[0.3.*, )",
-        "resolved": "0.3.1",
-        "contentHash": "+Jtg/ID8isRXdvB0/vpsuSpzrLY33rYtzSscdfijOaXqRqzVdah08ljpOZhQPKuid4JRX3RRzxNqc1p8azZbbg==",
-        "dependencies": {
-          "FSharp.Core": "4.6.2",
-          "System.Threading.Tasks.Extensions": "4.5.4"
-        }
-      },
       "YamlDotNet": {
         "type": "Direct",
         "requested": "[15.1.*, )",
         "resolved": "15.1.6",
         "contentHash": "T/cQEK/KHK96Q8kytJ4iUGDXg1/fj2Qtk6rCQeIlHYU1zTeyGVHW0QNZgREQyxZpygGMDMmrXNWt0sj5TsQnjA=="
-      },
-      "System.Threading.Tasks.Extensions": {
-        "type": "Transitive",
-        "resolved": "4.5.4",
-        "contentHash": "zteT+G8xuGu6mS+mzDzYXbzS7rd3K6Fjb9RiZlYlJPam2/hU7JCBZBVEcywNuR+oZ1ncTvc/cq0faRr3P01OVg=="
       }
     },
     "net8.0/linux-x64": {}

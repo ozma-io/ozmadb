@@ -5,7 +5,6 @@ open System.Threading
 open System.Runtime.Serialization
 open System.Threading.Tasks
 open FSharpPlus
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDB.OzmaUtils.Serialization

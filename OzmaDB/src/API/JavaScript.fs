@@ -9,7 +9,6 @@ open Microsoft.ClearScript
 open Microsoft.ClearScript.JavaScript
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
-open FSharp.Control.Tasks.Affine
 open Nito.AsyncEx
 
 open OzmaDB.OzmaUtils
@@ -353,15 +352,19 @@ type APIProxy(engine: JSEngine) as this =
                         return!
                             wrap handle
                             <| fun () ->
-                                lock.Dispose()
+                                task {
+                                    lock.Dispose()
 
-                                let inline lockBack () =
-                                    unitTask {
-                                        let! newLock = handle.UncancellableLock()
-                                        lock <- newLock
-                                    }
+                                    use _ =
+                                        Task.toDisposable
+                                        <| fun () ->
+                                            task {
+                                                let! newLock = handle.UncancellableLock()
+                                                lock <- newLock
+                                            }
 
-                                Task.deferAsync lockBack (fun () -> f handle)
+                                    return! f handle
+                                }
                     finally
                         lock.Dispose()
                 }
@@ -372,7 +375,7 @@ type APIProxy(engine: JSEngine) as this =
         }
 
     member inline private this.RunVoidApiCall([<InlineIfLambda>] f: APIHandle -> Task) : Task =
-        unitTask {
+        task {
             let handle = this.GetHandle()
 
             do!
@@ -399,7 +402,7 @@ type APIProxy(engine: JSEngine) as this =
     member inline private this.RunVoidResultApiCall<'e when 'e :> IErrorDetails>
         ([<InlineIfLambda>] f: APIHandle -> Task<Result<unit, 'e>>)
         : Task =
-        unitTask {
+        task {
             let handle = this.GetHandle()
             let! res = handle.StackLock <| fun () -> f handle
 

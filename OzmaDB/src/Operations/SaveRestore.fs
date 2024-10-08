@@ -12,7 +12,6 @@ open Microsoft.EntityFrameworkCore
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open YamlDotNet.Serialization.NamingConventions
-open FSharp.Control.Tasks.Affine
 open FSharpPlus
 
 open OzmaDB.OzmaUtils
@@ -535,7 +534,7 @@ let private checkNotNullData
     (tableRef: SQL.TableRef)
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         let buildCheckColumn (fieldName, isNotNullColumn) =
             let isNotNullExpr =
                 SQL.VEColumn
@@ -595,335 +594,323 @@ let private loadRestoredRows
     (rows: JsonMap seq)
     (cancellationToken: CancellationToken)
     : Task<SQL.TableRef * Set<FieldName>> =
-    task {
-        let addUsedFields usedFields (row: JsonMap) =
-            row |> Seq.fold (fun usedFields prop -> Set.add prop.Key usedFields) usedFields
+    let addUsedFields usedFields (row: JsonMap) =
+        row |> Seq.fold (fun usedFields prop -> Set.add prop.Key usedFields) usedFields
 
-        let usedFields = rows |> Seq.fold addUsedFields Set.empty
+    let usedFields = rows |> Seq.fold addUsedFields Set.empty
 
-        let builder = ColumnSourceBuilder(layout, key.FlatColumns.Length)
+    let builder = ColumnSourceBuilder(layout, key.FlatColumns.Length)
 
-        let getData (fieldName, field) =
-            if
-                Set.contains fieldName key.Fields
-                || (fieldIsOptional field && not (Set.contains (string fieldName) usedFields))
-            then
-                None
-            else
-                let fieldRef = { Entity = entityRef; Name = fieldName }
-                let source = builder.GetColumnSource false fieldRef
-                Some(fieldName, source)
+    let getData (fieldName, field) =
+        if
+            Set.contains fieldName key.Fields
+            || (fieldIsOptional field && not (Set.contains (string fieldName) usedFields))
+        then
+            None
+        else
+            let fieldRef = { Entity = entityRef; Name = fieldName }
+            let source = builder.GetColumnSource false fieldRef
+            Some(fieldName, source)
 
-        let entity = layout.FindEntity entityRef |> Option.get
+    let entity = layout.FindEntity entityRef |> Option.get
 
-        let dataColumnSources =
-            entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getData |> Map.ofSeq
+    let dataColumnSources =
+        entity.ColumnFields |> Map.toSeq |> Seq.mapMaybe getData |> Map.ofSeq
 
-        let combinedSources = Map.unionUnique key.Sources dataColumnSources
+    let combinedSources = Map.unionUnique key.Sources dataColumnSources
 
-        let mutable (arguments, argumentValues) =
-            match key.SchemaNamePath with
-            | None -> (emptyArguments, Map.empty)
-            | Some _ ->
-                let (compiledSchemaArg, arguments) =
-                    addArgument schemaArg schemaArgType emptyArguments
+    let mutable (arguments, argumentValues) =
+        match key.SchemaNamePath with
+        | None -> (emptyArguments, Map.empty)
+        | Some _ ->
+            let (compiledSchemaArg, arguments) =
+                addArgument schemaArg schemaArgType emptyArguments
 
-                (arguments, Map.singleton compiledSchemaArg.PlaceholderId (SQL.VInt schemaId))
+            (arguments, Map.singleton compiledSchemaArg.PlaceholderId (SQL.VInt schemaId))
 
-        let allColumns = Seq.append key.FlatColumns builder.Columns |> Seq.toArray
+    let allColumns = Seq.append key.FlatColumns builder.Columns |> Seq.toArray
 
-        let getRawArgument (col: FlatColumn) =
-            let finalFieldRef = List.last col
-            let finalEntity = layout.FindEntity finalFieldRef.Entity |> Option.get
-            let finalField = Map.find finalFieldRef.Name finalEntity.ColumnFields
+    let getRawArgument (col: FlatColumn) =
+        let finalFieldRef = List.last col
+        let finalEntity = layout.FindEntity finalFieldRef.Entity |> Option.get
+        let finalField = Map.find finalFieldRef.Name finalEntity.ColumnFields
 
-            { requiredArgument finalField.FieldType with
-                Optional = finalField.IsNullable }
+        { requiredArgument finalField.FieldType with
+            Optional = finalField.IsNullable }
 
-        let argumentsRow = allColumns |> Seq.map getRawArgument |> Seq.toArray
+    let argumentsRow = allColumns |> Seq.map getRawArgument |> Seq.toArray
 
-        let valueToArgument (arg: ResolvedArgument) (v: FieldValue) : ResolvedFieldExpr =
-            let (compiledArg, name, newArguments) = addAnonymousArgument arg arguments
-            arguments <- newArguments
-            argumentValues <- Map.add compiledArg.PlaceholderId (compileFieldValue v) argumentValues
-            resolvedRefFieldExpr <| VRArgument(PLocal name)
+    let valueToArgument (arg: ResolvedArgument) (v: FieldValue) : ResolvedFieldExpr =
+        let (compiledArg, name, newArguments) = addAnonymousArgument arg arguments
+        arguments <- newArguments
+        argumentValues <- Map.add compiledArg.PlaceholderId (compileFieldValue v) argumentValues
+        resolvedRefFieldExpr <| VRArgument(PLocal name)
 
-        let lookupField (fieldRef: ResolvedFieldRef) =
-            let currEntity = layout.FindEntity fieldRef.Entity |> Option.get
-            let currField = Map.find fieldRef.Name currEntity.ColumnFields
-            (fieldRef, currField)
+    let lookupField (fieldRef: ResolvedFieldRef) =
+        let currEntity = layout.FindEntity fieldRef.Entity |> Option.get
+        let currField = Map.find fieldRef.Name currEntity.ColumnFields
+        (fieldRef, currField)
 
-        let columnsWithFields = allColumns |> Array.map (List.map lookupField)
+    let columnsWithFields = allColumns |> Array.map (List.map lookupField)
 
-        let indexArgument = requiredArgument (FTScalar SFTInt)
+    let indexArgument = requiredArgument (FTScalar SFTInt)
 
-        let getSourceRow (rowIndex: int, topRow: JsonMap) =
-            let rec getRowValue
-                (parentPath: FieldName list)
-                (attrs: JsonMap)
-                : (ResolvedFieldRef * ResolvedColumnField) list -> FieldValue =
-                function
-                | [] -> failwith "Impossible"
-                | [ (fieldRef, field) ] ->
-                    let inline getPathString () =
-                        Seq.rev (fieldRef.Name :: parentPath)
-                        |> Seq.map toOzmaQLString
-                        |> String.concat "."
+    let getSourceRow (rowIndex: int, topRow: JsonMap) =
+        let rec getRowValue
+            (parentPath: FieldName list)
+            (attrs: JsonMap)
+            : (ResolvedFieldRef * ResolvedColumnField) list -> FieldValue =
+            function
+            | [] -> failwith "Impossible"
+            | [ (fieldRef, field) ] ->
+                let inline getPathString () =
+                    Seq.rev (fieldRef.Name :: parentPath)
+                    |> Seq.map toOzmaQLString
+                    |> String.concat "."
 
-                    match attrs.TryGetValue(string fieldRef.Name) with
-                    | (false, _) ->
-                        match field.DefaultValue with
-                        | Some def -> def
-                        | _ when field.IsNullable -> FNull
+                match attrs.TryGetValue(string fieldRef.Name) with
+                | (false, _) ->
+                    match field.DefaultValue with
+                    | Some def -> def
+                    | _ when field.IsNullable -> FNull
+                    | None ->
+                        let currPath = getPathString ()
+
+                        raisef RestoreSchemaException "Error at row %i, path %s: attribute not found" rowIndex currPath
+                | (true, attr) ->
+                    if attr.Type = JTokenType.Null && not field.IsNullable then
+                        let currPath = getPathString ()
+
+                        raisef RestoreSchemaException "Error at row %i, path %s: value cannot be null" rowIndex currPath
+                    else
+                        match parseValueFromJson field.FieldType attr with
                         | None ->
                             let currPath = getPathString ()
 
                             raisef
                                 RestoreSchemaException
-                                "Error at row %i, path %s: attribute not found"
+                                "Error at row %i, path %s: cannot convert value to type %O"
                                 rowIndex
                                 currPath
-                    | (true, attr) ->
-                        if attr.Type = JTokenType.Null && not field.IsNullable then
-                            let currPath = getPathString ()
+                                field.FieldType
+                        | Some v -> v
+            | (fieldRef, field) :: nextPath ->
+                let inline getPathString () =
+                    Seq.rev (fieldRef.Name :: parentPath)
+                    |> Seq.map toOzmaQLString
+                    |> String.concat "."
 
-                            raisef
-                                RestoreSchemaException
-                                "Error at row %i, path %s: value cannot be null"
-                                rowIndex
-                                currPath
-                        else
-                            match parseValueFromJson field.FieldType attr with
-                            | None ->
-                                let currPath = getPathString ()
+                let inline returnKeyNull () =
+                    // Default values are not used for key lookups.
+                    if field.IsNullable then
+                        FNull
+                    else
+                        let currPath = getPathString ()
 
-                                raisef
-                                    RestoreSchemaException
-                                    "Error at row %i, path %s: cannot convert value to type %O"
-                                    rowIndex
-                                    currPath
-                                    field.FieldType
-                            | Some v -> v
-                | (fieldRef, field) :: nextPath ->
-                    let inline getPathString () =
-                        Seq.rev (fieldRef.Name :: parentPath)
-                        |> Seq.map toOzmaQLString
-                        |> String.concat "."
+                        raisef RestoreSchemaException "Error at row %i, path %s: attribute not found" rowIndex currPath
 
-                    let inline returnKeyNull () =
-                        // Default values are not used for key lookups.
-                        if field.IsNullable then
-                            FNull
-                        else
-                            let currPath = getPathString ()
+                match attrs.TryGetValue(string fieldRef.Name) with
+                | (false, _) -> returnKeyNull ()
+                | (true, attr) ->
+                    match attr with
+                    | :? JObject as innerAttrs ->
+                        getRowValue (fieldRef.Name :: parentPath) (JsonMap innerAttrs) nextPath
+                    | value when value.Type = JTokenType.Null -> returnKeyNull ()
+                    | _ ->
+                        let currPath = getPathString ()
+                        raisef RestoreSchemaException "Error at row %i, path %s: sub-key expected" rowIndex currPath
 
-                            raisef
-                                RestoreSchemaException
-                                "Error at row %i, path %s: attribute not found"
-                                rowIndex
-                                currPath
+        let indexColumn = valueToArgument indexArgument (FInt rowIndex)
 
-                    match attrs.TryGetValue(string fieldRef.Name) with
-                    | (false, _) -> returnKeyNull ()
-                    | (true, attr) ->
-                        match attr with
-                        | :? JObject as innerAttrs ->
-                            getRowValue (fieldRef.Name :: parentPath) (JsonMap innerAttrs) nextPath
-                        | value when value.Type = JTokenType.Null -> returnKeyNull ()
-                        | _ ->
-                            let currPath = getPathString ()
-                            raisef RestoreSchemaException "Error at row %i, path %s: sub-key expected" rowIndex currPath
+        let rawValues =
+            columnsWithFields
+            |> Seq.map (getRowValue [] topRow)
+            |> Seq.map2 valueToArgument argumentsRow
 
-            let indexColumn = valueToArgument indexArgument (FInt rowIndex)
+        Seq.append (Seq.singleton indexColumn) rawValues
+        |> Seq.map VVExpr
+        |> Seq.toArray
 
-            let rawValues =
-                columnsWithFields
-                |> Seq.map (getRowValue [] topRow)
-                |> Seq.map2 valueToArgument argumentsRow
+    let rawValues = rows |> Seq.indexed |> Seq.map getSourceRow |> Seq.toArray
+    let rawSelect = SValues rawValues |> selectExpr
+    let rawDataColumnNames = seq { 0 .. allColumns.Length - 1 } |> Seq.map rawColumnName
 
-            Seq.append (Seq.singleton indexColumn) rawValues
-            |> Seq.map VVExpr
-            |> Seq.toArray
+    let rawColumnNames =
+        Seq.append (Seq.singleton indexColumnName) rawDataColumnNames |> Seq.toArray
 
-        let rawValues = rows |> Seq.indexed |> Seq.map getSourceRow |> Seq.toArray
-        let rawSelect = SValues rawValues |> selectExpr
-        let rawDataColumnNames = seq { 0 .. allColumns.Length - 1 } |> Seq.map rawColumnName
+    let rawAlias =
+        { Name = rawValuesName
+          Fields = Some rawColumnNames }
+        : EntityAlias
 
-        let rawColumnNames =
-            Seq.append (Seq.singleton indexColumnName) rawDataColumnNames |> Seq.toArray
+    let schemaIdExpr = resolvedRefFieldExpr <| VRArgument schemaArg
 
-        let rawAlias =
-            { Name = rawValuesName
-              Fields = Some rawColumnNames }
-            : EntityAlias
+    let mutable from = FTableExpr <| fromSubSelectExpr rawSelect rawAlias
+    let mutable lastSubkeyId = 0
+    let mutable checkNotNull = []
 
-        let schemaIdExpr = resolvedRefFieldExpr <| VRArgument schemaArg
+    let buildDataColumn (resultName: FieldName) (resultSource: CustomEntityValueSource) =
+        let rec getValueColumn (source: CustomEntityValueSource) : ResolvedFieldExpr =
+            match source with
+            | CVSSchemaId -> schemaIdExpr
+            | CVSColumn i ->
+                resolvedRefFieldExpr
+                <| VRColumn
+                    { Entity = Some rawValuesRef
+                      Name = rawColumnName i }
+            | CVSRef(entityRef, attrs) ->
+                let thisKeyName = subKeyName lastSubkeyId
+                lastSubkeyId <- lastSubkeyId + 1
+                let thisKeyRef = { Schema = None; Name = thisKeyName }: EntityRef
 
-        let mutable from = FTableExpr <| fromSubSelectExpr rawSelect rawAlias
-        let mutable lastSubkeyId = 0
-        let mutable checkNotNull = []
+                let referenceFrom =
+                    FEntity
+                        { fromEntity (relaxEntityRef entityRef) with
+                            Alias = Some thisKeyName }
 
-        let buildDataColumn (resultName: FieldName) (resultSource: CustomEntityValueSource) =
-            let rec getValueColumn (source: CustomEntityValueSource) : ResolvedFieldExpr =
-                match source with
-                | CVSSchemaId -> schemaIdExpr
-                | CVSColumn i ->
-                    resolvedRefFieldExpr
-                    <| VRColumn
-                        { Entity = Some rawValuesRef
-                          Name = rawColumnName i }
-                | CVSRef(entityRef, attrs) ->
-                    let thisKeyName = subKeyName lastSubkeyId
-                    lastSubkeyId <- lastSubkeyId + 1
-                    let thisKeyRef = { Schema = None; Name = thisKeyName }: EntityRef
+                let buildKeyAttrCheck (subkeyName, subkeySource) =
+                    let keyIdExpr = getValueColumn subkeySource
 
-                    let referenceFrom =
-                        FEntity
-                            { fromEntity (relaxEntityRef entityRef) with
-                                Alias = Some thisKeyName }
+                    let referenceFieldExpr =
+                        resolvedRefFieldExpr
+                        <| VRColumn
+                            { Entity = Some thisKeyRef
+                              Name = subkeyName }
+                        : ResolvedFieldExpr
 
-                    let buildKeyAttrCheck (subkeyName, subkeySource) =
-                        let keyIdExpr = getValueColumn subkeySource
+                    FEBinaryOp(keyIdExpr, BOEq, referenceFieldExpr)
 
-                        let referenceFieldExpr =
-                            resolvedRefFieldExpr
-                            <| VRColumn
-                                { Entity = Some thisKeyRef
-                                  Name = subkeyName }
-                            : ResolvedFieldExpr
+                let joinCheck =
+                    attrs |> Map.toSeq |> Seq.map buildKeyAttrCheck |> Seq.fold1 (curry FEAnd)
 
-                        FEBinaryOp(keyIdExpr, BOEq, referenceFieldExpr)
+                let join =
+                    { A = from
+                      B = referenceFrom
+                      Type = Left
+                      Condition = joinCheck }
 
-                    let joinCheck =
-                        attrs |> Map.toSeq |> Seq.map buildKeyAttrCheck |> Seq.fold1 (curry FEAnd)
+                from <- FJoin join
 
-                    let join =
-                        { A = from
-                          B = referenceFrom
-                          Type = Left
-                          Condition = joinCheck }
+                resolvedRefFieldExpr
+                <| VRColumn
+                    { Entity = Some thisKeyRef
+                      Name = funId }
 
-                    from <- FJoin join
+        let dataExpr = getValueColumn resultSource
 
-                    resolvedRefFieldExpr
-                    <| VRColumn
-                        { Entity = Some thisKeyRef
-                          Name = funId }
+        let dataColumn =
+            { queryColumnResult dataExpr with
+                Alias = Some resultName }
 
-            let dataExpr = getValueColumn resultSource
+        let field = Map.find resultName entity.ColumnFields
 
-            let dataColumn =
-                { queryColumnResult dataExpr with
-                    Alias = Some resultName }
+        let isNotNullColumn =
+            match field.FieldType with
+            | FTScalar(SFTReference(refEntityRef, opts)) when field.IsNullable ->
+                // We check if any related column is null, because the only way that can happen is if the top-level reference itself is NULL.
+                // That's, in turn, because we forbid nullable columns in alternate keys.
+                let rec getColumn =
+                    function
+                    | CVSSchemaId -> None
+                    | CVSColumn i -> Some i
+                    | CVSRef(entityRef, attrs) -> attrs |> Map.values |> Seq.mapMaybe getColumn |> Seq.first
 
-            let field = Map.find resultName entity.ColumnFields
+                let anyColumn = getColumn resultSource |> Option.get |> rawColumnName
 
-            let isNotNullColumn =
-                match field.FieldType with
-                | FTScalar(SFTReference(refEntityRef, opts)) when field.IsNullable ->
-                    // We check if any related column is null, because the only way that can happen is if the top-level reference itself is NULL.
-                    // That's, in turn, because we forbid nullable columns in alternate keys.
-                    let rec getColumn =
-                        function
-                        | CVSSchemaId -> None
-                        | CVSColumn i -> Some i
-                        | CVSRef(entityRef, attrs) -> attrs |> Map.values |> Seq.mapMaybe getColumn |> Seq.first
+                let anyFieldRef =
+                    { Entity = Some rawValuesRef
+                      Name = anyColumn }
+                    : FieldRef
 
-                    let anyColumn = getColumn resultSource |> Option.get |> rawColumnName
+                let anyRef = resolvedRefFieldExpr <| VRColumn anyFieldRef
+                let colName = isNotNullColumnName resultName
+                checkNotNull <- (resultName, colName) :: checkNotNull
 
-                    let anyFieldRef =
-                        { Entity = Some rawValuesRef
-                          Name = anyColumn }
-                        : FieldRef
+                Seq.singleton
+                    { queryColumnResult (FEIsNotNull anyRef) with
+                        Alias = Some colName }
+            | _ -> Seq.empty
 
-                    let anyRef = resolvedRefFieldExpr <| VRColumn anyFieldRef
-                    let colName = isNotNullColumnName resultName
-                    checkNotNull <- (resultName, colName) :: checkNotNull
+        let cols = Seq.append isNotNullColumn (Seq.singleton dataColumn)
+        (dataExpr, cols)
 
-                    Seq.singleton
-                        { queryColumnResult (FEIsNotNull anyRef) with
-                            Alias = Some colName }
-                | _ -> Seq.empty
+    let sourceRef = relaxEntityRef entityRef
 
-            let cols = Seq.append isNotNullColumn (Seq.singleton dataColumn)
-            (dataExpr, cols)
+    let sourceIdExpr =
+        resolvedRefFieldExpr
+        <| VRColumn
+            { Entity = Some sourceRef
+              Name = funId }
+        : ResolvedFieldExpr
 
-        let sourceRef = relaxEntityRef entityRef
+    let idColumn = queryColumnResult sourceIdExpr
 
-        let sourceIdExpr =
+    let indexExpr =
+        resolvedRefFieldExpr
+        <| VRColumn
+            { Entity = Some rawValuesRef
+              Name = indexColumnName }
+        : ResolvedFieldExpr
+
+    let indexColumn = queryColumnResult indexExpr
+
+    let dataColumnExprs = combinedSources |> Map.map buildDataColumn
+    let dataColumns = dataColumnExprs |> Map.values |> Seq.collect snd
+
+    let resultColumns =
+        Seq.append
+            (seq {
+                indexColumn
+                idColumn
+            })
+            dataColumns
+        |> Seq.map QRExpr
+        |> Seq.toArray
+
+    let buildKeyAttrCheck (fieldName: FieldName) =
+        let (fieldExpr, columns) = Map.find fieldName dataColumnExprs
+
+        let sourceFieldRef =
             resolvedRefFieldExpr
             <| VRColumn
                 { Entity = Some sourceRef
-                  Name = funId }
+                  Name = fieldName }
             : ResolvedFieldExpr
 
-        let idColumn = queryColumnResult sourceIdExpr
+        FEBinaryOp(fieldExpr, BOEq, sourceFieldRef)
 
-        let indexExpr =
-            resolvedRefFieldExpr
-            <| VRColumn
-                { Entity = Some rawValuesRef
-                  Name = indexColumnName }
-            : ResolvedFieldExpr
+    let joinCheck = key.Fields |> Seq.map buildKeyAttrCheck |> Seq.fold1 (curry FEAnd)
 
-        let indexColumn = queryColumnResult indexExpr
+    let sourceFrom =
+        FEntity
+            { fromEntity sourceRef with
+                Only = true }
 
-        let dataColumnExprs = combinedSources |> Map.map buildDataColumn
-        let dataColumns = dataColumnExprs |> Map.values |> Seq.collect snd
+    let sourceJoin =
+        { A = from
+          B = sourceFrom
+          Type = Left
+          Condition = joinCheck }
 
-        let resultColumns =
-            Seq.append
-                (seq {
-                    indexColumn
-                    idColumn
-                })
-                dataColumns
-            |> Seq.map QRExpr
-            |> Seq.toArray
+    let singleSelect =
+        { emptySingleSelectExpr with
+            Results = resultColumns
+            From = Some <| FJoin sourceJoin }
 
-        let buildKeyAttrCheck (fieldName: FieldName) =
-            let (fieldExpr, columns) = Map.find fieldName dataColumnExprs
+    let select = selectExpr (SSelect singleSelect)
+    let (selectInfo, compiled) = compileSelectExpr layout arguments select
 
-            let sourceFieldRef =
-                resolvedRefFieldExpr
-                <| VRColumn
-                    { Entity = Some sourceRef
-                      Name = fieldName }
-                : ResolvedFieldExpr
+    let dataTableName = connection.NewAnonymousSQLName "restored_data"
+    let dataTableRef = { Schema = None; Name = dataTableName }: SQL.TableRef
 
-            FEBinaryOp(fieldExpr, BOEq, sourceFieldRef)
+    let dataTable =
+        { Table = dataTableRef
+          Query = compiled
+          Columns = None
+          Temporary = Some { OnCommit = Some SQL.CADrop } }
+        : SQL.CreateTableAsOperation
 
-        let joinCheck = key.Fields |> Seq.map buildKeyAttrCheck |> Seq.fold1 (curry FEAnd)
-
-        let sourceFrom =
-            FEntity
-                { fromEntity sourceRef with
-                    Only = true }
-
-        let sourceJoin =
-            { A = from
-              B = sourceFrom
-              Type = Left
-              Condition = joinCheck }
-
-        let singleSelect =
-            { emptySingleSelectExpr with
-                Results = resultColumns
-                From = Some <| FJoin sourceJoin }
-
-        let select = selectExpr (SSelect singleSelect)
-        let (selectInfo, compiled) = compileSelectExpr layout arguments select
-
-        let dataTableName = connection.NewAnonymousSQLName "restored_data"
-        let dataTableRef = { Schema = None; Name = dataTableName }: SQL.TableRef
-
-        let dataTable =
-            { Table = dataTableRef
-              Query = compiled
-              Columns = None
-              Temporary = Some { OnCommit = Some SQL.CADrop } }
-            : SQL.CreateTableAsOperation
-
+    task {
         let! _ = connection.Connection.Query.ExecuteNonQuery (string dataTable) argumentValues cancellationToken
 
         // Check that for all non-NULL values references have been found.
@@ -943,7 +930,7 @@ let private insertRestoredRows
     (idsTableRef: SQL.TableRef)
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         let allFields = Seq.append key.Fields availableColumns |> Seq.toArray
 
         let getSourceColumn (fieldName: FieldName) =
@@ -1104,7 +1091,7 @@ let private deleteNonRestoredRows
     (maybeIdsTableRef: SQL.TableRef option)
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         let (arguments, argumentValues, schemaCheck) =
             match key.SchemaNamePath with
             | None -> (emptyArguments, Map.empty, None)
@@ -1291,7 +1278,7 @@ let restoreCustomEntities
     (allEntitiesMap: SchemaCustomEntities)
     (cancellationToken: CancellationToken)
     : Task =
-    unitTask {
+    task {
         let restoredSchemas = allEntitiesMap |> Map.keys |> Seq.map string |> Seq.toArray
 
         let! schemaIds =

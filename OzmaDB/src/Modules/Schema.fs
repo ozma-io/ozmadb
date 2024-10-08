@@ -6,7 +6,6 @@ open System.Linq.Expressions
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDB.Modules.Source
@@ -44,5 +43,5 @@ let buildSchemaModules
             |> Seq.map (fun schema -> (OzmaQLName schema.Name, makeSourceModulesSchema schema))
             |> Map.ofSeqUnique
 
-        return { Schemas = sourceSchemas }
+        return ({ Schemas = sourceSchemas }: SourceModules)
     }

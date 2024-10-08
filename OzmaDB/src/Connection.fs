@@ -8,7 +8,6 @@ open Microsoft.EntityFrameworkCore
 open Microsoft.EntityFrameworkCore.Diagnostics
 open Npgsql
 open System.Threading.Tasks
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDBSchema.System
@@ -97,8 +96,8 @@ type DatabaseTransaction private (conn: DatabaseConnection, transaction: NpgsqlT
 
     let mutable constraintsDeferred = false
 
-    let setConstraintsImmediate (cancellationToken: CancellationToken) =
-        unitTask {
+    let setConstraintsImmediate (cancellationToken: CancellationToken) : Task =
+        task {
             try
                 let! _ = conn.Query.ExecuteNonQuery "SET CONSTRAINTS ALL IMMEDIATE" Map.empty cancellationToken
                 constraintsDeferred <- false
@@ -115,8 +114,8 @@ type DatabaseTransaction private (conn: DatabaseConnection, transaction: NpgsqlT
             return new DatabaseTransaction(conn, transaction)
         }
 
-    member this.Rollback() =
-        unitVtask {
+    member this.Rollback() : Task =
+        task {
             do! system.DisposeAsync()
             do! transaction.DisposeAsync()
         }
@@ -182,7 +181,7 @@ type DatabaseTransaction private (conn: DatabaseConnection, transaction: NpgsqlT
             transaction.Dispose()
 
     interface IAsyncDisposable with
-        member this.DisposeAsync() = this.Rollback()
+        member this.DisposeAsync() = this.Rollback() |> ValueTask
 
     member this.System = system
     member this.Transaction = transaction

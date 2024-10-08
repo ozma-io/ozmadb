@@ -4,7 +4,6 @@ open System.Threading
 open System.Threading.Tasks
 open Microsoft.FSharp.Quotations
 open Microsoft.EntityFrameworkCore
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDBSchema.System

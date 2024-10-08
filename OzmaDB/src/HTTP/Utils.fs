@@ -15,7 +15,6 @@ open Microsoft.Extensions.Options
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Http
 open Microsoft.AspNetCore.Authentication.JwtBearer
-open FSharp.Control.Tasks.Affine
 open StackExchange
 open Newtonsoft.Json
 open Serilog
@@ -451,6 +450,15 @@ type HttpJobSettings() =
     member val RemoteIdleTimeout = TimeSpan(0, 0, 10) with get, set
     member val HybridLocalTimeout = TimeSpan(0, 0, 25) with get, set
 
+let rec private findAllStackOverflowSources (e: RequestStackOverflowException) =
+    seq {
+        yield e.Source
+
+        match e.InnerException with
+        | :? RequestStackOverflowException as e -> yield! findAllStackOverflowSources e
+        | _ -> ()
+    }
+
 type HttpJobUtils
     (
         serviceProvider: IServiceProvider,
@@ -730,16 +738,7 @@ type HttpJobUtils
                 logger.LogError(e, "Database access denied")
                 return jobError <| RIAccessDenied "Access denied"
             | :? RequestStackOverflowException as topE ->
-                let rec findAllSources (e: RequestStackOverflowException) =
-                    seq {
-                        yield e.Source
-
-                        match e.InnerException with
-                        | :? RequestStackOverflowException as e -> yield! findAllSources e
-                        | _ -> ()
-                    }
-
-                let allSources = findAllSources topE
+                let allSources = findAllStackOverflowSources topE
 
                 let msg =
                     allSources

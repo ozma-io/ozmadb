@@ -3,7 +3,6 @@ module OzmaDB.API.UserViews
 open FSharpPlus
 open System.Linq
 open System.Threading.Tasks
-open FSharp.Control.Tasks.Affine
 open Microsoft.Extensions.Logging
 open Microsoft.EntityFrameworkCore
 open Newtonsoft.Json

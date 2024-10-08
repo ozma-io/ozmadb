@@ -4,7 +4,6 @@ open System
 open System.IO
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Http
-open FSharp.Control.Tasks.Affine
 open Giraffe
 open Giraffe.EndpointRouting
 

@@ -8,7 +8,6 @@ open Microsoft.Extensions.Logging
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
 open NodaTime
-open FSharp.Control.Tasks.Affine
 
 open OzmaDB.OzmaUtils
 open OzmaDB.OzmaUtils.Serialization.Utils
@@ -1006,8 +1005,8 @@ let logAPIResponse<'Request, 'Response when 'Response :> ILoggableResponse>
         )
     }
 
-let logAPISuccess<'Request> (rctx: IRequestContext) (name: string) (request: 'Request) =
-    unitTask {
+let logAPISuccess<'Request> (rctx: IRequestContext) (name: string) (request: 'Request) : Task =
+    task {
         do!
             rctx.WriteEventSync(fun event ->
                 event.Type <- name
@@ -1038,8 +1037,8 @@ let logAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggableResponse
     (name: string)
     (request: 'Request)
     (result: Result<'Response, 'Error>)
-    =
-    unitTask {
+    : Task =
+    task {
         match result with
         | Ok response -> do! logAPIResponse rctx name request response
         | Error error -> logAPIError rctx name request error
@@ -1050,8 +1049,8 @@ let logUnitAPIResult<'Request, 'Error when 'Error :> IErrorDetails>
     (name: string)
     (request: 'Request)
     (result: Result<unit, 'Error>)
-    =
-    unitTask {
+    : Task =
+    task {
         match result with
         | Ok() -> do! logAPISuccess rctx name request
         | Error error -> logAPIError rctx name request error
@@ -1063,8 +1062,8 @@ let logAPIIfError<'Request, 'Response, 'Error when 'Error :> IErrorDetails>
     (name: string)
     (request: 'Request)
     (result: Result<'Response, 'Error>)
-    =
-    unitTask {
+    : Task =
+    task {
         match result with
         | Ok response -> ()
         | Error error -> logAPIError rctx name request error

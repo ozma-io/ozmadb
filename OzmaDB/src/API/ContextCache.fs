@@ -13,7 +13,6 @@ open Microsoft.Extensions.Logging
 open Microsoft.Extensions.ObjectPool
 open FluidCaching
 open Npgsql
-open FSharp.Control.Tasks.Affine
 
 open OzmaDBSchema.System
 open OzmaDB.OzmaUtils
@@ -277,7 +276,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
         }
 
     let ensureDatabaseVersion (conn: DatabaseTransaction) (cancellationToken: CancellationToken) : Task =
-        unitTask {
+        task {
             let! databaseEntry =
                 conn.System.State
                     .AsTracking()
@@ -542,7 +541,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                     ()
                 with ex ->
                     do! transaction.Rollback()
-                    return reraise' ex
+                    reraise' ex
 
                 do! transaction.Rollback()
                 return false
@@ -714,11 +713,11 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
         (next: unit -> Task)
         : Task<bool> =
         task {
+            use _ = transaction
+            use _ = transaction.Connection
             let! success = cachedStateLock.WaitAsync(0)
 
             if not success then
-                do! (transaction :> IAsyncDisposable).DisposeAsync()
-                do! (transaction.Connection :> IAsyncDisposable).DisposeAsync()
                 do! cachedStateLock.WaitAsync(cancellationToken)
                 ignore <| cachedStateLock.Release()
                 return false
@@ -727,12 +726,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                     do! next ()
                     return true
                 finally
-                    ignore
-                    <| unitTask {
-                        ignore <| cachedStateLock.Release()
-                        do! (transaction :> IAsyncDisposable).DisposeAsync()
-                        do! (transaction.Connection :> IAsyncDisposable).DisposeAsync()
-                    }
+                    ignore <| cachedStateLock.Release()
         }
 
     let rec getCachedState (cancellationToken: CancellationToken) : Task<DatabaseConnection * CachedState> =
@@ -744,7 +738,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                 let! _ =
                     updateStateAndRelease transaction cancellationToken
                     <| fun () ->
-                        unitTask {
+                        task {
                             let! databaseVersion = getDatabaseVersion transaction cancellationToken
 
                             if databaseVersion = Some currentDatabaseVersion then
@@ -763,7 +757,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                     let! _ =
                         updateStateAndRelease transaction cancellationToken
                         <| fun () ->
-                            unitTask {
+                            task {
                                 transaction.Connection.Connection.UnprepareAll()
 
                                 match! rebuildFromDatabase transaction ver cancellationToken with
@@ -782,7 +776,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                 let! _ =
                     updateStateAndRelease transaction cancellationToken
                     <| fun () ->
-                        unitTask {
+                        task {
                             transaction.Connection.Connection.UnprepareAll()
 
                             match! coldRebuildFromDatabase transaction cancellationToken with
@@ -825,7 +819,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                     OrderedMap.empty: OrderedMap<string, Layout -> Task<Result<unit, GenericErrorInfo>>>
 
                 let runCommitCallbacks layout =
-                    unitTask {
+                    task {
                         for cb in OrderedMap.values scheduledBeforeCommit do
                             match! cb layout with
                             | Ok() -> ()
@@ -836,7 +830,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                 let mutable commitCancellationToken = initialCancellationToken
 
                 let migrate () =
-                    unitTask {
+                    task {
                         let! localSuccess = cachedStateLock.WaitAsync(0)
 
                         if not localSuccess then
@@ -1306,8 +1300,8 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                             return Error <| GECommit(GEOther(fullUserMessage e))
                     }
 
-                let checkIntegrity () =
-                    unitTask {
+                let checkIntegrity () : Task =
+                    task {
                         let assertions =
                             buildAssertions oldState.Context.Layout (filterUserLayout oldState.Context.Layout)
 
@@ -1425,7 +1419,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                                 isDisposed <- true
 
                         member this.DisposeAsync() =
-                            unitVtask {
+                            task {
                                 if not isDisposed then
                                     if apiProxy.IsValueCreated then
                                         apiProxy.Value.ResetAPI()
@@ -1436,7 +1430,8 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                                     do! (transaction :> IAsyncDisposable).DisposeAsync()
                                     do! (transaction.Connection :> IAsyncDisposable).DisposeAsync()
                                     isDisposed <- true
-                            } }
+                            }
+                            |> ValueTask }
             with e ->
                 do! (transaction :> IAsyncDisposable).DisposeAsync()
                 do! (transaction.Connection :> IAsyncDisposable).DisposeAsync()
