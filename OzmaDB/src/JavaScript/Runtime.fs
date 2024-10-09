@@ -579,6 +579,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         : 'a =
         let inline run () =
             pendingTasks.Value <- null
+
             try
                 try
                     f ()
@@ -759,10 +760,12 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
             true,
             Action<_, _>(fun (resolve: IJavaScriptObject) (reject: IJavaScriptObject) ->
                 let myPendingTasks = pendingTasks.Value
+
                 if isNull myPendingTasks then
                     raisef JavaScriptRuntimeException "Async functions are not allowed here"
 
-                let mutable runTask : Task = null
+                let mutable runTask: Task = null
+
                 runTask <-
                     task {
                         try
@@ -780,16 +783,16 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
                             ignore
                             <| match ret with
-                                | Ok r -> resolve.InvokeAsFunction(r)
-                                | Error e -> reject.InvokeAsFunction(e)
+                               | Ok r -> resolve.InvokeAsFunction(r)
+                               | Error e -> reject.InvokeAsFunction(e)
                         finally
                             // Might be `null` is the task is finished immediately.
                             if not <| isNull runTask then
                                 ignore <| myPendingTasks.Remove(runTask)
                     }
+
                 if not <| runTask.IsCompleted then
-                    ignore <| myPendingTasks.Add(runTask)
-            )
+                    ignore <| myPendingTasks.Add(runTask))
         )
 
     member this.RunJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) : obj =
