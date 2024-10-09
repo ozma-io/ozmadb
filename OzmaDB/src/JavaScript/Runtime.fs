@@ -416,7 +416,6 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
     let asyncStackTrace = AsyncLocal<string>()
     let pendingTasks = AsyncLocal<Collections.Generic.HashSet<Task>>()
 
-
     let createError (message: string) =
         errorConstructor.Invoke(true, message) :?> IJavaScriptObject
 
@@ -475,18 +474,13 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
     let handleHostExceptionInJS (hostException: exn) =
         let interrupt (e: exn) =
             match interruptEDI with
-            | Some oldE ->
-                // A call to engine unwrapped into `runFunctionInRuntime` happened.
-                Log.Error(
-                    oldE.SourceException,
-                    "The JavaScript engine got interrupted before, but the host didn't wrap the call properly."
-                )
-            | None -> ()
+            | Some oldE -> oldE.Throw()
+            | None ->
+                let edi = ExceptionDispatchInfo.Capture(e)
+                interruptEDI <- Some edi
+                engine.Interrupt()
+                edi.Throw()
 
-            engine.Interrupt()
-            let edi = ExceptionDispatchInfo.Capture(e)
-            interruptEDI <- Some edi
-            edi.Throw()
             failwith "Impossible"
 
         try
@@ -515,9 +509,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         | _ -> ()
 
         match interruptEDI with
-        | Some edi ->
-            interruptEDI <- None
-            edi.Throw()
+        | Some edi -> edi.Throw()
         | None -> ()
 
         match jsException with
@@ -578,8 +570,6 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         ([<InlineIfLambda>] f: unit -> 'a)
         : 'a =
         let inline run () =
-            pendingTasks.Value <- null
-
             try
                 try
                     f ()
@@ -608,6 +598,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
             finally
                 currentCancellationToken <- None
                 currentJSExceptionsMap <- None
+                interruptEDI <- None
                 exceptionsMap.Clear()
         | Some otherCancellationToken ->
             if
@@ -637,7 +628,12 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                             task {
                                 while newPendingTasks.Count > 0 do
                                     let task = newPendingTasks |> Seq.first |> Option.get
-                                    do! task
+
+                                    try
+                                        do! task
+                                    with _ ->
+                                        ()
+
                                     ignore <| newPendingTasks.Remove(task)
                             }
 
@@ -665,11 +661,31 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                 currentJSExceptionsMap <- Some(weakMapConstructor.Invoke(true) :?> IJavaScriptObject)
 
                 try
-                    use handle = cancellationToken.UnsafeRegister((fun _ -> engine.Interrupt()), null)
-                    return! run ()
+                    // We have observed a bug in ClearScript when a task for a cancelled JavaScript
+                    // evaluation is never cancelled. Explicitly subscribing to the cancellation
+                    // token like that seems to solve the issue.
+                    let cancelledTask = TaskCompletionSource()
+
+                    use handle =
+                        cancellationToken.UnsafeRegister(
+                            (fun _ ->
+                                engine.Interrupt()
+                                cancelledTask.SetCanceled()),
+                            null
+                        )
+
+                    let runTask = run ()
+                    let! successful = Task.WhenAny(runTask :> Task, cancelledTask.Task)
+
+                    if successful = cancelledTask.Task then
+                        cancellationToken.ThrowIfCancellationRequested()
+                        return failwith "Impossible"
+                    else
+                        return! runTask
                 finally
                     currentCancellationToken <- None
                     currentJSExceptionsMap <- None
+                    interruptEDI <- None
                     exceptionsMap.Clear()
             | Some otherCancellationToken ->
                 if
