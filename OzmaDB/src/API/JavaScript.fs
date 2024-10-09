@@ -49,23 +49,27 @@ type WriteEventRequest = { Details: JToken }
 
 type private APIHandle(api: IOzmaDBAPI) =
     let logger = api.Request.Context.LoggerFactory.CreateLogger<APIHandle>()
-    let mutable lock = AsyncLocal<AsyncLock>()
-    do lock.Value <- AsyncLock()
+    let topLevelLock = AsyncLock()
+    let nestedLock = AsyncLocal<AsyncLock>()
+
+    let getLock () =
+        match nestedLock.Value with
+        | null -> topLevelLock
+        | lock -> lock
 
     member this.API = api
     member this.Logger = logger
 
     member this.Lock() =
-        lock.Value.LockAsync(api.Request.Context.CancellationToken)
+        (getLock ()).LockAsync(api.Request.Context.CancellationToken)
 
-    member this.UncancellableLock() = lock.Value.LockAsync()
-
+    member this.UncancellableLock() = (getLock ()).LockAsync()
 
     // We need to support stacking the locks because API functions may call back into JavaScript.
-    member inline this.StackLock(f: unit -> Task<'a>) : Task<'a> =
+    member inline this.StackLock([<InlineIfLambda>] f: unit -> Task<'a>) : Task<'a> =
         task {
             use! guard = this.Lock()
-            lock.Value <- AsyncLock()
+            nestedLock.Value <- AsyncLock()
             return! f ()
         }
 
