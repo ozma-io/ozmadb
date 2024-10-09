@@ -413,7 +413,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
     let mutable currentCancellationToken: CancellationToken option = None
     let exceptionsMap = ConditionalWeakTable<exn, IJavaScriptObject>()
 
-    let stackTracesStack = AsyncLocal<string list>()
+    let asyncStackTrace = AsyncLocal<string>()
     let pendingTasks = AsyncLocal<Collections.Generic.HashSet<Task>>()
 
 
@@ -472,7 +472,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                 e.ScriptExceptionAsObject :?> IJavaScriptObject
             | e -> createError (fullUserMessage e)
 
-    member this.InternalHandleHostExceptionInJS(hostException: exn) =
+    let handleHostExceptionInJS (hostException: exn) =
         let interrupt (e: exn) =
             match interruptEDI with
             | Some oldE ->
@@ -509,7 +509,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
             Log.Error(e, "Unexpected exception while saving the original exception.")
             reraise ()
 
-    member this.InternalTryRestoreJSException(jsException: exn) =
+    let tryRestoreJSException (jsException: exn) =
         match jsException with
         | :? ScriptEngineException as e when e.IsFatal -> runtime.SetMetMemoryLimit()
         | _ -> ()
@@ -544,44 +544,20 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
             | None -> exceptionsMap.AddOrUpdate(jsException, jsExc)
         | _ -> ()
 
-    member this.InternalPushAsyncJob(stack: string) =
-        if isNull pendingTasks.Value then
-            raisef JavaScriptRuntimeException "Async functions are not allowed here"
-
-        let oldStack =
-            if obj.ReferenceEquals(stackTracesStack.Value, null) then
-                []
-            else
-                stackTracesStack.Value
-
-        stackTracesStack.Value <- stack :: oldStack
-
-        let finish = TaskCompletionSource()
-        ignore <| pendingTasks.Value.Add(finish.Task)
-        finish
-
-    member this.InternalPopAsyncJob(finish: TaskCompletionSource) =
-        match stackTracesStack.Value with
-        | stack :: nextStack -> stackTracesStack.Value <- nextStack
-        | _ -> failwith "Unexpected: no recorded stack frames"
-
-        ignore <| pendingTasks.Value.Remove(finish.Task)
-        finish.SetResult()
-
     [<ScriptUsage(ScriptAccess.Full)>]
     member private this.EnrichStackTrace(stack: string) =
-        if obj.ReferenceEquals(stackTracesStack.Value, null) then
+        if obj.ReferenceEquals(asyncStackTrace.Value, null) then
             stack
         else
             seq {
                 yield stack
-                yield! Seq.truncate 1 stackTracesStack.Value
+                yield asyncStackTrace.Value
             }
             |> String.concat ",\n"
 
     // These are used to test if the stack traces get enriched correctly.
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.Yield() =
+    member private this.Yield() =
         this.WrapAsyncHostFunction(fun () ->
             task {
                 do! Task.Yield()
@@ -589,7 +565,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
             })
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.YieldAndRun(f: IJavaScriptObject) =
+    member private this.YieldAndRun(f: IJavaScriptObject) =
         this.WrapAsyncHostFunction(fun () ->
             task {
                 do! Task.Yield()
@@ -602,11 +578,12 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         ([<InlineIfLambda>] f: unit -> 'a)
         : 'a =
         let inline run () =
+            pendingTasks.Value <- null
             try
                 try
                     f ()
                 with e ->
-                    this.InternalTryRestoreJSException e
+                    tryRestoreJSException e
                     reraise ()
             with
             | :? ScriptEngineException as e ->
@@ -660,13 +637,14 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                 while newPendingTasks.Count > 0 do
                                     let task = newPendingTasks |> Seq.first |> Option.get
                                     do! task
+                                    ignore <| newPendingTasks.Remove(task)
                             }
 
                     try
                         try
                             return! f ()
                         with e ->
-                            this.InternalTryRestoreJSException e
+                            tryRestoreJSException e
                             return reraise' e
                     with
                     | :? ScriptEngineException as e ->
@@ -761,12 +739,11 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
     member this.CreateError message = createError message
 
-    // `inline` stopped working here and I have no idea why.
     member this.WrapHostFunction(f: unit -> 'a) =
         try
             f () :> obj
         with e ->
-            let error = this.InternalHandleHostExceptionInJS e
+            let error = handleHostExceptionInJS e
             wrappedHostExceptionConstructor.Invoke(true, error)
 
     member this.WrapAsyncHostFunction(f: unit -> Task<'a>) =
@@ -781,31 +758,38 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         wrappedHostPromiseConstructor.Invoke(
             true,
             Action<_, _>(fun (resolve: IJavaScriptObject) (reject: IJavaScriptObject) ->
-                ignore
-                <| task {
-                    let source = this.InternalPushAsyncJob(stack)
+                let myPendingTasks = pendingTasks.Value
+                if isNull myPendingTasks then
+                    raisef JavaScriptRuntimeException "Async functions are not allowed here"
 
-                    let! ret =
-                        task {
-                            try
-                                try
-                                    let! ret = f ()
-                                    return Ok ret
-                                with e ->
-                                    let jsExc = this.InternalHandleHostExceptionInJS e
-                                    return Error jsExc
-                            with e ->
-                                this.InternalPopAsyncJob(source)
-                                return reraise' e
-                        }
+                let mutable runTask : Task = null
+                runTask <-
+                    task {
+                        try
+                            let! ret =
+                                task {
+                                    asyncStackTrace.Value <- stack
 
-                    this.InternalPopAsyncJob(source)
+                                    try
+                                        let! ret = f ()
+                                        return Ok ret
+                                    with e ->
+                                        let jsExc = handleHostExceptionInJS e
+                                        return Error jsExc
+                                }
 
-                    ignore
-                    <| match ret with
-                       | Ok r -> resolve.InvokeAsFunction(r)
-                       | Error e -> reject.InvokeAsFunction(e)
-                })
+                            ignore
+                            <| match ret with
+                                | Ok r -> resolve.InvokeAsFunction(r)
+                                | Error e -> reject.InvokeAsFunction(e)
+                        finally
+                            // Might be `null` is the task is finished immediately.
+                            if not <| isNull runTask then
+                                ignore <| myPendingTasks.Remove(runTask)
+                    }
+                if not <| runTask.IsCompleted then
+                    ignore <| myPendingTasks.Add(runTask)
+            )
         )
 
     member this.RunJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) : obj =
