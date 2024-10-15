@@ -1,7 +1,8 @@
 module OzmaDB.Modules.Load
 
+open System.Threading
+
 open OzmaDB.OzmaUtils
-open OzmaDB.OzmaUtils.Parsing
 open OzmaDB.OzmaQL.AST
 open OzmaDB.Objects.Types
 open OzmaDB.Modules.Types
@@ -27,10 +28,11 @@ let moduleFiles (modules: ResolvedModules) : ModuleFile seq =
     }
 
 let private resolvedPreparedModulesSchema
-    (runtime: JSEngine)
+    (engine: AbstractJSEngine)
     (forceAllowBroken: bool)
     (schemaName: SchemaName)
     (resolved: ModulesSchema)
+    (cancellationToken: CancellationToken)
     : ModulesSchema =
     let getOne path maybeModule =
         match maybeModule with
@@ -44,7 +46,7 @@ let private resolvedPreparedModulesSchema
                   AllowBroken = modul.AllowBroken }
 
             try
-                ignore <| runtime.CreateModule moduleFile
+                ignore <| engine.CreateModule(moduleFile, cancellationToken)
                 Ok modul
             with
             | :? JavaScriptRuntimeException as e when modul.AllowBroken || forceAllowBroken ->
@@ -57,9 +59,14 @@ let private resolvedPreparedModulesSchema
     let modules = Map.map getOne resolved.Modules
     { Modules = modules }
 
-let resolvedLoadedModules (resolved: ResolvedModules) (runtime: JSEngine) (forceAllowBroken: bool) : ResolvedModules =
+let resolvedLoadedModules
+    (resolved: ResolvedModules)
+    (engine: AbstractJSEngine)
+    (forceAllowBroken: bool)
+    (cancellationToken: CancellationToken)
+    : ResolvedModules =
     let getOne name schema =
-        resolvedPreparedModulesSchema runtime forceAllowBroken name schema
+        resolvedPreparedModulesSchema engine forceAllowBroken name schema cancellationToken
 
     let schemas = Map.map getOne resolved.Schemas
     { Schemas = schemas }

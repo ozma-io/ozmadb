@@ -106,7 +106,7 @@ type IContext =
     abstract member TransactionId: int
     abstract member TransactionTime: Instant
     abstract member LoggerFactory: ILoggerFactory
-    abstract member Engine: JSEngine
+    abstract member Engine: AbstractJSEngine
 
     abstract member Layout: Layout
     abstract member UserViews: PrefetchedUserViews

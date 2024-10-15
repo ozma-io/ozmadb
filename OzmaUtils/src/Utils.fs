@@ -81,7 +81,7 @@ let inline unmaskableLock (k: 'Lock) (f: (unit -> unit) -> 'a) : 'a =
     let mutable lockWasTaken = false
 
     try
-        Monitor.Enter(k, ref lockWasTaken)
+        Monitor.Enter(k, &lockWasTaken)
 
         let inline unmask () =
             if lockWasTaken then

@@ -38,13 +38,16 @@ type GeneratedUserViews =
 
 let emptyGeneratedUserViews: GeneratedUserViews = { Schemas = Map.empty }
 
-type private UserViewsGeneratorScript(engine: JSEngine, path: string, scriptSource: string) =
+type private UserViewsGeneratorScript
+    (engine: AbstractJSEngine, path: string, scriptSource: string, cancellationToken: CancellationToken) =
     let func =
         try
-            engine.CreateDefaultFunction
+            engine.CreateDefaultFunction(
                 { Path = path
                   Source = scriptSource
-                  AllowBroken = false }
+                  AllowBroken = false },
+                cancellationToken
+            )
         with :? JavaScriptRuntimeException as e ->
             raisefUserWithInner UserViewGenerateException e "Couldn't initialize user view generator"
 
@@ -71,7 +74,7 @@ let private generatorName (schemaName: SchemaName) =
 
 type private UserViewsGenerator
     (
-        engine: JSEngine,
+        engine: AbstractJSEngine,
         layout: Layout,
         triggers: MergedTriggers,
         cancellationToken: CancellationToken,
@@ -84,7 +87,9 @@ type private UserViewsGenerator
         (script: SourceUserViewsGeneratorScript)
         : PossiblyBroken<GeneratedUserViewsSchema> =
         let layout = engine.Json.Serialize(serializedLayout)
-        let gen = UserViewsGeneratorScript(engine, generatorName name, script.Script)
+
+        let gen =
+            UserViewsGeneratorScript(engine, generatorName name, script.Script, cancellationToken)
 
         try
             let uvs = gen.Generate layout cancellationToken
@@ -108,7 +113,7 @@ type private UserViewsGenerator
     member this.GenerateUserViews views = generateUserViews views
 
 let generateUserViews
-    (engine: JSEngine)
+    (engine: AbstractJSEngine)
     (layout: Layout)
     (triggers: MergedTriggers)
     (forceAllowBroken: bool)

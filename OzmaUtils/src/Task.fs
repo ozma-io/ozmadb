@@ -2,6 +2,7 @@
 module OzmaDB.OzmaUtils.Task
 
 open System
+open System.Threading
 open System.Threading.Tasks
 
 let inline map (f: 'r1 -> 'r2) (t: ^a) : Task<'r2> =
@@ -11,6 +12,9 @@ let inline map (f: 'r1 -> 'r2) (t: ^a) : Task<'r2> =
     }
 
 let result (a: 'a) : Task<'a> = Task.FromResult a
+
+let waitFor (t: Task) =
+    t.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing)
 
 let empty = Task.CompletedTask
 
@@ -42,3 +46,105 @@ let inline loop (arg: 'arg) ([<InlineIfLambda>] f: 'arg -> Task<LoopResult<'arg,
 
         return result
     }
+
+// Kinda like an explicit and tracking TaskScheduler.
+type ICustomTaskScheduler =
+    abstract member Post: (unit -> Task<'a>) -> Task<'a>
+    abstract member Post: (unit -> Task) -> Task
+    abstract member WaitAll: CancellationToken -> Task
+
+type NoCustomTaskScheduler() =
+    member this.Post(f: unit -> Task<'a>) : Task<'a> = f ()
+
+    member this.Post(f: unit -> Task) : Task = f ()
+
+    member this.WaitAll(cancellationToken: CancellationToken) : Task = Task.CompletedTask
+
+    member this.CheckedWaitAll(cancellationToken: CancellationToken) : Task = Task.CompletedTask
+
+    interface ICustomTaskScheduler with
+        member this.Post(f: unit -> Task<'a>) = this.Post f
+        member this.Post(f: unit -> Task) = this.Post f
+        member this.WaitAll cancellationToken = this.WaitAll cancellationToken
+
+type LastTaskRef() =
+    let mutable lastTask = Task.CompletedTask
+
+    member this.Exchange(task: Task) : Task = Interlocked.Exchange(&lastTask, task)
+
+    member this.WaitForLastTask(cancellationToken: CancellationToken) : Task =
+        loop ()
+        <| fun () ->
+            task {
+                let currLastTask = lastTask
+                do! waitFor <| currLastTask.WaitAsync(cancellationToken)
+                cancellationToken.ThrowIfCancellationRequested()
+
+                if lastTask = currLastTask then
+                    return StopLoop()
+                else
+                    return NextLoop()
+            }
+        :> Task
+
+type TrackingTaskScheduler() =
+    let lastTask = LastTaskRef()
+
+    member this.Post<'t when 't :> Task>(f: unit -> 't) : 't =
+        let thisTask = f ()
+        let nextTaskSource = TaskCompletionSource()
+        let prevTask = lastTask.Exchange nextTaskSource.Task
+
+        ignore
+        <| task {
+            do! waitFor prevTask
+            do! waitFor thisTask
+            nextTaskSource.SetResult()
+        }
+
+        thisTask
+
+    member this.WaitAll(cancellationToken: CancellationToken) : Task =
+        lastTask.WaitForLastTask cancellationToken
+
+    interface ICustomTaskScheduler with
+        member this.Post(f: unit -> Task<'a>) = this.Post f
+        member this.Post(f: unit -> Task) = this.Post f
+        member this.WaitAll cancellationToken = this.WaitAll cancellationToken
+
+type SerializingTrackingTaskScheduler() =
+    let lastTask = LastTaskRef()
+
+    member this.Post(f: unit -> Task<'a>) : Task<'a> =
+        let nextTaskSource = TaskCompletionSource()
+        let prevTask = lastTask.Exchange nextTaskSource.Task
+
+        task {
+            do! waitFor prevTask
+
+            try
+                return! f ()
+            finally
+                nextTaskSource.SetResult()
+        }
+
+    member this.Post(f: unit -> Task) : Task =
+        let nextTaskSource = TaskCompletionSource()
+        let prevTask = lastTask.Exchange nextTaskSource.Task
+
+        task {
+            do! waitFor prevTask
+
+            try
+                do! f ()
+            finally
+                nextTaskSource.SetResult()
+        }
+
+    member this.WaitAll(cancellationToken: CancellationToken) : Task =
+        lastTask.WaitForLastTask cancellationToken
+
+    interface ICustomTaskScheduler with
+        member this.Post(f: unit -> Task<'a>) = this.Post f
+        member this.Post(f: unit -> Task) = this.Post f
+        member this.WaitAll cancellationToken = this.WaitAll cancellationToken

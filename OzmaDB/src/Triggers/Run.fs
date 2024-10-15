@@ -40,10 +40,10 @@ type ArgsTriggerResult =
     | ATUntouched
     | ATCancelled
 
-type TriggerScript(engine: JSEngine, name: string, scriptSource: string) =
+type TriggerScript(engine: AbstractJSEngine, name: string, scriptSource: string, cancellationToken: CancellationToken) =
     let func =
         try
-            engine.CreateDefaultFunction <| moduleFile name scriptSource
+            engine.CreateDefaultFunction(moduleFile name scriptSource, cancellationToken)
         with :? JavaScriptRuntimeException as e ->
             raisefUserWithInner TriggerRunException e ""
 
@@ -191,7 +191,8 @@ type PreparedTriggers =
 let private triggerName (triggerRef: TriggerRef) =
     sprintf "triggers/%O/%O/%O/%O.mjs" triggerRef.Schema triggerRef.Entity.Schema triggerRef.Entity.Name triggerRef.Name
 
-type private PreparedTriggersBuilder(engine: JSEngine, forceAllowBroken: bool) =
+type private PreparedTriggersBuilder
+    (engine: AbstractJSEngine, forceAllowBroken: bool, cancellationToken: CancellationToken) =
     let prepareTriggersEntity
         (schemaName: SchemaName)
         (triggerEntity: ResolvedEntityRef)
@@ -204,7 +205,9 @@ type private PreparedTriggersBuilder(engine: JSEngine, forceAllowBroken: bool) =
                   Name = name }
 
             try
-                let script = TriggerScript(engine, triggerName triggerRef, trigger.Procedure)
+                let script =
+                    TriggerScript(engine, triggerName triggerRef, trigger.Procedure, cancellationToken)
+
                 Ok { Resolved = trigger; Script = script }
             with
             | :? TriggerRunException as e when trigger.AllowBroken || forceAllowBroken ->
@@ -233,6 +236,11 @@ type private PreparedTriggersBuilder(engine: JSEngine, forceAllowBroken: bool) =
 
     member this.PrepareTriggers triggers = prepareTriggers triggers
 
-let prepareTriggers (engine: JSEngine) (forceAllowBroken: bool) (triggers: ResolvedTriggers) =
-    let builder = PreparedTriggersBuilder(engine, forceAllowBroken)
+let prepareTriggers
+    (engine: AbstractJSEngine)
+    (forceAllowBroken: bool)
+    (triggers: ResolvedTriggers)
+    (cancellationToken: CancellationToken)
+    =
+    let builder = PreparedTriggersBuilder(engine, forceAllowBroken, cancellationToken)
     builder.PrepareTriggers triggers

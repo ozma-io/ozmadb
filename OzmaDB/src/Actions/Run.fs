@@ -24,10 +24,10 @@ type ActionRunException(message: string, innerException: exn, isUserException: b
 
     new(message: string) = ActionRunException(message, null, true)
 
-type ActionScript(engine: JSEngine, name: string, scriptSource: string) =
+type ActionScript(engine: AbstractJSEngine, name: string, scriptSource: string, cancellationToken: CancellationToken) =
     let func =
         try
-            engine.CreateDefaultFunction <| moduleFile name scriptSource
+            engine.CreateDefaultFunction(moduleFile name scriptSource, cancellationToken)
         with :? JavaScriptRuntimeException as e ->
             raisefWithInner ActionRunException e "Couldn't initialize action"
 
@@ -71,12 +71,18 @@ type PreparedActions =
 let private actionName (actionRef: ActionRef) =
     sprintf "actions/%O/%O.mjs" actionRef.Schema actionRef.Name
 
-type private PreparedActionsBuilder(engine: JSEngine, forceAllowBroken: bool) =
+type private PreparedActionsBuilder
+    (engine: AbstractJSEngine, forceAllowBroken: bool, cancellationToken: CancellationToken) =
     let prepareActionsSchema (schemaName: SchemaName) (actions: ActionsSchema) : PreparedActionsSchema =
         let prepareOne name (action: ResolvedAction) =
             try
                 let script =
-                    ActionScript(engine, actionName { Schema = schemaName; Name = name }, action.Function)
+                    ActionScript(
+                        engine,
+                        actionName { Schema = schemaName; Name = name },
+                        action.Function,
+                        cancellationToken
+                    )
 
                 Ok script
             with :? ActionRunException as e when action.AllowBroken || forceAllowBroken ->
@@ -91,8 +97,13 @@ type private PreparedActionsBuilder(engine: JSEngine, forceAllowBroken: bool) =
 
     member this.PrepareActions actions = prepareActions actions
 
-let prepareActions (engine: JSEngine) (forceAllowBroken: bool) (actions: ResolvedActions) : PreparedActions =
-    let eval = PreparedActionsBuilder(engine, forceAllowBroken)
+let prepareActions
+    (engine: AbstractJSEngine)
+    (forceAllowBroken: bool)
+    (actions: ResolvedActions)
+    (cancellationToken: CancellationToken)
+    : PreparedActions =
+    let eval = PreparedActionsBuilder(engine, forceAllowBroken, cancellationToken)
     eval.PrepareActions actions
 
 let private resolvedPreparedActionsSchema (resolved: ActionsSchema) (prepared: PreparedActionsSchema) : ActionsSchema =

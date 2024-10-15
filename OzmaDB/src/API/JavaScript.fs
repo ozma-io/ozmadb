@@ -9,7 +9,6 @@ open Microsoft.ClearScript
 open Microsoft.ClearScript.JavaScript
 open Newtonsoft.Json
 open Newtonsoft.Json.Linq
-open Nito.AsyncEx
 
 open OzmaDB.OzmaUtils
 open OzmaDB.OzmaUtils.Serialization.Utils
@@ -49,49 +48,14 @@ type WriteEventRequest = { Details: JToken }
 
 type private APIHandle(api: IOzmaDBAPI) =
     let logger = api.Request.Context.LoggerFactory.CreateLogger<APIHandle>()
-    let topLevelLock = AsyncLock()
-    let nestedLock = AsyncLocal<AsyncLock>()
-
-    let getLock () =
-        match nestedLock.Value with
-        | null -> topLevelLock
-        | lock -> lock
 
     member this.API = api
     member this.Logger = logger
-
-    member this.Lock() =
-        (getLock ()).LockAsync(api.Request.Context.CancellationToken)
-
-    member this.UncancellableLock() = (getLock ()).LockAsync()
-
-    // We need to support stacking the locks because API functions may call back into JavaScript.
-    member inline this.StackLock([<InlineIfLambda>] f: unit -> Task<'a>) : Task<'a> =
-        task {
-            use! guard = this.Lock()
-            nestedLock.Value <- AsyncLock()
-            return! f ()
-        }
 
 let private preludeSource =
     """
     const apiProxy = globalThis.apiProxy;
     delete globalThis.apiProxy;
-    const unwrapHostResult = globalThis.unwrapHostResult;
-    delete globalThis.unwrapHostResult;
-
-    const wrapHostFunction = (func) => (...args) => {
-        const ret = func(...args);
-        return unwrapHostResult(ret);
-    };
-
-    const internal = {};
-    for (const key of Object.getOwnPropertyNames(apiProxy)) {
-        const value = apiProxy[key];
-        if (typeof value === 'function') {
-            internal[key] = wrapHostFunction(value);
-        }
-    }
 
     const findInnerByKey = (object, key) => {
         for (const value of Object.values(object)) {
@@ -127,8 +91,8 @@ let private preludeSource =
     globalThis.FunDBError = OzmaDBError;
 
     globalThis.formatDate = (date) => date.toISOString().split('T')[0];
-    globalThis.formatOzmaQLName = (arg) => internal.FormatOzmaQLName(arg);
-    globalThis.formatOzmaQLValue = (arg) => internal.FormatOzmaQLValue(arg);
+    globalThis.formatOzmaQLName = (arg) => apiProxy.FormatOzmaQLName(arg);
+    globalThis.formatOzmaQLValue = (arg) => apiProxy.FormatOzmaQLValue(arg);
 
     // DEPRECATED
     globalThis.renderDate = globalThis.formatDate;
@@ -151,15 +115,15 @@ let private preludeSource =
         }
 
         getUserView(source, args, chunk) {
-            return internal.GetUserView({ source: normalizeSource(source), args, chunk });
+            return apiProxy.GetUserView({ source: normalizeSource(source), args, chunk });
         };
 
         getUserViewInfo(source) {
-            return internal.GetUserViewInfo({ source: normalizeSource(source) });
+            return apiProxy.GetUserViewInfo({ source: normalizeSource(source) });
         };
 
         getEntityInfo(entity) {
-            return internal.GetEntityInfo({ entity });
+            return apiProxy.GetEntityInfo({ entity });
         };
 
         async insertEntry(entity, fields) {
@@ -185,7 +149,7 @@ let private preludeSource =
         }
 
         insertEntries(entity, entries) {
-            return internal.InsertEntries({ entity, entries });
+            return apiProxy.InsertEntries({ entity, entries });
         };
 
         // DEPRECATED
@@ -195,7 +159,7 @@ let private preludeSource =
         };
 
         updateEntry(entity, id, fields) {
-            return internal.UpdateEntry({ entity, id, fields });
+            return apiProxy.UpdateEntry({ entity, id, fields });
         };
 
         // DEPRECATED
@@ -204,7 +168,7 @@ let private preludeSource =
         };
 
         deleteEntry(entity, id) {
-            return internal.DeleteEntry({ entity, id });
+            return apiProxy.DeleteEntry({ entity, id });
         };
 
         // DEPRECATED
@@ -213,7 +177,7 @@ let private preludeSource =
         };
 
         getRelatedEntries(entity, id) {
-            return internal.GetRelatedEntries({ entity, id });
+            return apiProxy.GetRelatedEntries({ entity, id });
         };
 
         // DEPRECATED
@@ -222,31 +186,31 @@ let private preludeSource =
         };
 
         recursiveDeleteEntry(entity, id) {
-            return internal.RecursiveDeleteEntry({ entity, id });
+            return apiProxy.RecursiveDeleteEntry({ entity, id });
         };
 
         runCommand(command, args) {
-            return internal.RunCommand({ command, args });
+            return apiProxy.RunCommand({ command, args });
         };
 
         deferConstraints(func) {
-            return internal.DeferConstraints(func);
+            return apiProxy.DeferConstraints(func);
         };
 
         pretendRole(asRole, func) {
-            return internal.PretendRole({ asRole }, func);
+            return apiProxy.PretendRole({ asRole }, func);
         };
 
         getDomainValues(entity, id, chunk) {
-            return internal.GetDomainValues({ entity, id, chunk });
+            return apiProxy.GetDomainValues({ entity, id, chunk });
         };
 
         writeEvent(details) {
-            return internal.WriteEvent({ details });
+            return apiProxy.WriteEvent({ details });
         };
 
         writeEventSync(details) {
-            return internal.WriteEventSync({ details });
+            return apiProxy.WriteEventSync({ details });
         };
 
         cancelWith(userData, message) {
@@ -299,8 +263,11 @@ let private preludeDoc =
     RuntimeLocal(fun runtime -> runtime.Runtime.Compile(info, preludeSource))
 
 [<DefaultScriptUsage(ScriptAccess.None)>]
-type APIProxy(engine: JSEngine) as this =
-    let mutable currentHandle = None: APIHandle option
+type OzmaJSEngine(engine: JSEngine) as this =
+    inherit SchedulerJSEngine<Task.SerializingTrackingTaskScheduler>(engine, Task.SerializingTrackingTaskScheduler)
+
+    let mutable topLevelAPI = None: IOzmaDBAPI option
+    let apiHandle = AsyncLocal<APIHandle>()
 
     do
         engine.Engine.AddHostObject("apiProxy", this)
@@ -336,9 +303,12 @@ type APIProxy(engine: JSEngine) as this =
         ret
 
     member private this.GetHandle() =
-        match currentHandle with
-        | Some handle -> handle
-        | None -> this.FormatError "This API call cannot be used in this context"
+        let handle = apiHandle.Value
+
+        if isRefNull handle then
+            this.FormatError "This API call cannot be used in this context"
+        else
+            handle
 
     member inline private this.WrapApiCall<'Result, 'Error when 'Error :> IErrorDetails>
         ([<InlineIfLambda>] wrap: APIHandle -> (unit -> Task<'Result>) -> Task<Result<'Result, 'Error>>)
@@ -346,32 +316,7 @@ type APIProxy(engine: JSEngine) as this =
         : Task<'Result> =
         task {
             let handle = this.GetHandle()
-
-            let! ret =
-                task {
-                    let! firstLock = handle.Lock()
-                    let mutable lock = firstLock
-
-                    try
-                        return!
-                            wrap handle
-                            <| fun () ->
-                                task {
-                                    lock.Dispose()
-
-                                    use _ =
-                                        Task.toDisposable
-                                        <| fun () ->
-                                            task {
-                                                let! newLock = handle.UncancellableLock()
-                                                lock <- newLock
-                                            }
-
-                                    return! f handle
-                                }
-                    finally
-                        lock.Dispose()
-                }
+            let! ret = wrap handle <| fun () -> f handle
 
             match ret with
             | Ok r -> return r
@@ -381,14 +326,7 @@ type APIProxy(engine: JSEngine) as this =
     member inline private this.RunVoidApiCall([<InlineIfLambda>] f: APIHandle -> Task) : Task =
         task {
             let handle = this.GetHandle()
-
-            do!
-                handle.StackLock
-                <| fun () ->
-                    task {
-                        do! f handle
-                        return ()
-                    }
+            do! f handle
         }
 
     member inline private this.RunResultApiCall<'a, 'e when 'e :> IErrorDetails>
@@ -396,7 +334,7 @@ type APIProxy(engine: JSEngine) as this =
         : Task<obj> =
         task {
             let handle = this.GetHandle()
-            let! res = handle.StackLock <| fun () -> f handle
+            let! res = f handle
 
             match res with
             | Ok r -> return engine.Json.Serialize(r)
@@ -408,7 +346,7 @@ type APIProxy(engine: JSEngine) as this =
         : Task =
         task {
             let handle = this.GetHandle()
-            let! res = handle.StackLock <| fun () -> f handle
+            let! res = f handle
 
             match res with
             | Ok r -> ()
@@ -419,18 +357,18 @@ type APIProxy(engine: JSEngine) as this =
         (arg: obj)
         ([<InlineIfLambda>] f: APIHandle -> 'Request -> Task<Result<'Response, 'Error>>)
         =
-        engine.WrapAsyncHostFunction
-        <| fun () ->
-            let req = this.Deserialize arg: 'Request
-            this.RunResultApiCall <| fun handle -> f handle req
+        let req = this.Deserialize arg: 'Request
+
+        this.WrapAsyncHostFunction
+        <| fun () -> this.RunResultApiCall <| fun handle -> f handle req
 
     [<ScriptUsage(ScriptAccess.Full)>]
     member this.FormatOzmaQLName(name: string) =
-        engine.WrapHostFunction <| fun () -> renderOzmaQLName name
+        this.WrapHostFunction <| fun () -> renderOzmaQLName name
 
     [<ScriptUsage(ScriptAccess.Full)>]
     member this.FormatOzmaQLValue(arg: obj) =
-        engine.WrapHostFunction
+        this.WrapHostFunction
         <| fun () ->
             use reader = new V8JsonReader(arg)
 
@@ -483,19 +421,19 @@ type APIProxy(engine: JSEngine) as this =
 
     [<ScriptUsage(ScriptAccess.Full)>]
     member this.DeferConstraints(f: IJavaScriptObject) =
-        engine.WrapAsyncHostFunction
+        this.WrapAsyncHostFunction
         <| fun () ->
             this.WrapApiCall(fun handle -> handle.API.Entities.DeferConstraints)
-            <| fun handle -> engine.RunAsyncJSFunction(f, [||])
+            <| fun handle -> this.RunAsyncJSFunction(f, [||])
 
     [<ScriptUsage(ScriptAccess.Full)>]
     member this.PretendRole (req: obj) (f: IJavaScriptObject) =
-        engine.WrapAsyncHostFunction
+        this.WrapAsyncHostFunction
         <| fun () ->
             let req = this.Deserialize req: PretendRoleRequest
 
             this.WrapApiCall(fun handle -> handle.API.Request.PretendRole req)
-            <| fun handle -> engine.RunAsyncJSFunction(f, [||])
+            <| fun handle -> this.RunAsyncJSFunction(f, [||])
 
     [<ScriptUsage(ScriptAccess.Full)>]
     member this.GetDomainValues arg =
@@ -503,7 +441,7 @@ type APIProxy(engine: JSEngine) as this =
 
     [<ScriptUsage(ScriptAccess.Full)>]
     member this.WriteEvent(arg: obj) =
-        engine.WrapHostFunction
+        this.WrapHostFunction
         <| fun () ->
             let req = this.Deserialize arg: WriteEventRequest
             let handle = this.GetHandle()
@@ -537,9 +475,28 @@ type APIProxy(engine: JSEngine) as this =
                 event.Request <- JsonConvert.SerializeObject req)
 
     member this.SetAPI(api: IOzmaDBAPI) =
-        assert (Option.isNone currentHandle)
-        currentHandle <- Some <| APIHandle(api)
+        assert (Option.isNone topLevelAPI)
+        topLevelAPI <- Some api
 
-    member this.ResetAPI api = currentHandle <- None
+    member this.ResetAPI api = topLevelAPI <- None
 
-    member this.Engine = engine
+    // Ugh. Workarounds.
+    member private this.BaseRunAsyncJSFunction
+        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
+        =
+        base.RunAsyncJSFunction(func, args, cancellationToken)
+
+    override this.RunAsyncJSFunction
+        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
+        : Task<obj> =
+        task {
+            if isRefNull apiHandle.Value then
+                let ozma =
+                    match topLevelAPI with
+                    | None -> failwith "API handle is not set"
+                    | Some api -> api
+
+                apiHandle.Value <- APIHandle(ozma)
+
+            return! this.BaseRunAsyncJSFunction(func, args, cancellationToken)
+        }

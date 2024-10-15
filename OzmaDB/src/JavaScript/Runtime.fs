@@ -96,6 +96,21 @@ type private JSDocumentLoader(env: JSEnvironment) =
 
     let documentsMap = env.Files |> Seq.collect makeModuleDocuments |> Map.ofSeqUnique
 
+
+    // ClearScript doesn't allow to get an evaluated module and just returns `undefined`.
+    // So to import a module, we need to inject it into the loader, and remove later.
+    // Ugh.
+    let currentModule = new ThreadLocal<StringDocument>()
+
+    member this.WithCurrentModuleOnce(doc: StringDocument, f: unit -> 'a) : 'a =
+        let oldCurrentModule = currentModule.Value
+
+        try
+            currentModule.Value <- doc
+            f ()
+        finally
+            currentModule.Value <- oldCurrentModule
+
     override this.LoadDocument
         (
             settings: DocumentSettings,
@@ -107,10 +122,10 @@ type private JSDocumentLoader(env: JSEnvironment) =
         let inline moduleNotFound () =
             raisef JavaScriptRuntimeException "Module not found: %s" specifier
 
-        if specifier = "__current__" && Option.isSome this.CurrentModule then
-            let m = Option.get this.CurrentModule
-            // Reset it after a single usage.
-            this.CurrentModule <- None
+        if specifier = "__current__" && not (isNull currentModule.Value) then
+            let m = currentModule.Value
+            // Remove it so that the module itself can't use this import.
+            currentModule.Value <- null
             m
         else if POSIXPath.isAbsolute specifier then
             // We don't support absolute paths.
@@ -152,11 +167,6 @@ type private JSDocumentLoader(env: JSEnvironment) =
         ) =
         Task.FromResult
         <| this.LoadDocument(settings, sourceInfo, specifier, category, contextCallback)
-
-    // ClearScript doesn't allow to get an evaluated module and just returns `undefined`.
-    // So to import a module, we need to inject it into the loader, and remove later.
-    // Ugh.
-    member val CurrentModule: StringDocument option = None with get, set
 
 [<NoComparison>]
 type JSRuntimeLimits =
@@ -212,7 +222,7 @@ type RuntimeLocal<'a when 'a: not struct>(create: JSRuntime -> 'a) =
 let private preludeSource =
     """
     const engine = globalThis.engine;
-    delete globalThis.engine;
+    // delete globalThis.engine;
     // Can't delete `gc`; unset it this way instead.
     globalThis.gc = undefined;
 
@@ -221,42 +231,6 @@ let private preludeSource =
     const errorToString = OldError.prototype.toString;
     const arrayJoin = Array.prototype.join;
 
-    // Needed because ClearScript doesn't allow to throw plain JavaScript exceptions
-    // from a host function.
-    // Instead we pass the host return values through `unwrapHostResult`, which
-    // may rethrow.
-    class WrappedHostException {
-        constructor(e) {
-            this.e = e;
-        }
-    }
-    globalThis.WrappedHostException = WrappedHostException;
-
-    // We need control over where the continuations get called because
-    // we maintain a set of currently progressing tasks.
-    // But ClearScript automatically converts tasks to promises and back for us
-    // (maybe disable that? but we need to wrap the host return values anyway...).
-    // So if we just construct a Promise with the constructor and immediately return it,
-    // ClearScript converts the Promise to the Task, and then back ~ _ ~
-    // This garbles our exceptions and wastes cycles, so we need to call the constructor
-    // outside of the host function.
-    class WrappedHostPromise {
-        constructor(f) {
-            this.f = f;
-        }
-    }
-    globalThis.WrappedHostPromise = WrappedHostPromise;
-
-    globalThis.unwrapHostResult = (ret) => {
-        if (ret instanceof WrappedHostException) {
-            throw ret.e;
-        } else if (ret instanceof WrappedHostPromise) {
-            return new Promise(ret.f);
-        } else {
-            return ret;
-        }
-    };
-
     const namedFunction = (name, f) => {
         Object.defineProperty(f, "name", { value: name });
         return f;
@@ -264,6 +238,10 @@ let private preludeSource =
 
     const enrichedExceptionsMap = new WeakMap();
     globalThis.enrichedExceptionsMap = enrichedExceptionsMap;
+
+    globalThis.throwException = (exc) => {
+        throw exc;
+    };
 
     // Unfortunately, V8 doesn't have any hook to call on any error,
     // and doesn't have any way to patch it completely.
@@ -313,10 +291,6 @@ let private preludeSource =
         }
     }
 
-    const prepareStackTraceFlags = {
-        inHostGetStackTrace: false,
-    };
-    globalThis.prepareStackTraceFlags = prepareStackTraceFlags;
     OldError.prepareStackTrace = (error, trace) => {
         const errorString = errorToString.call(error);
         if (trace.length === 0) {
@@ -328,25 +302,45 @@ let private preludeSource =
             if (fileName === null) {
                 return false;
             }
-            // Okay, this is crazy: if we filter this frame, `engine.GetStackTrace()` breaks.
-            // So we set this flag before we call it and reset it back afterwards.
-            if (!prepareStackTraceFlags.inHostGetStackTrace && fileName === "V8ScriptEngine [internal]") {
+            if (fileName === "V8ScriptEngine [internal]") {
                 return false;
             }
             const functionName = frame.getFunctionName();
             // Hide the wrapped Error.
-            if (fileName === "prelude.js" && (functionName === "Error" || functionName.match(errorRegex))) {
+            if (fileName === "prelude.js" && (functionName === "Error" || functionName.match(errorRegex) || functionName === "getStackTrace")) {
                 return false;
             }
             return true;
         });
         return `${errorString}\nat ${arrayJoin.call(trace, ',\nat ')}`;
     };
+
+    // There is an issue when using ClearScript's `GetStackTrace()`:
+    // It automatically skips the first two frames, and because of our `prepareStackTrace`
+    // function, we end up removing more than we should.
+    // Instead, implement our own `getStackTrace` which works in the same way.
+    const getStackTrace = () => {
+        try {
+            throw new Error('[stack trace]');
+        }
+        catch (e) {
+            const stack = e.stack;
+            // Remove the first line.
+            return stack.substring(stack.indexOf('\n') + 1, stack.length);
+        }
+    };
+    globalThis.getStackTrace = getStackTrace;
 """
 
 let private preludeDoc =
     let info = DocumentInfo("prelude.js", Category = ModuleCategory.Standard)
     RuntimeLocal(fun runtime -> runtime.Runtime.Compile(info, preludeSource))
+
+let inline private (|IsInterrupt|_|) (e: exn) =
+    match e with
+    | :? OperationCanceledException -> Some e
+    | :? ScriptEngineException as e when e.IsFatal -> Some e
+    | _ -> None
 
 let private getJSExceptionUserData (obj: IJavaScriptObject) : JToken option =
     let userData = obj.["userData"]
@@ -362,14 +356,49 @@ let private getJSExceptionUserData (obj: IJavaScriptObject) : JToken option =
         with :? JsonReaderException as e ->
             raisefWithInner JavaScriptRuntimeException e "Failed to parse user data"
 
+[<AbstractClass>]
+type AbstractJSEngine() =
+    abstract member CreateModule: ModuleFile * CancellationToken -> IJavaScriptObject
+
+    member this.CreateModule(file: ModuleFile) : IJavaScriptObject =
+        this.CreateModule(file, CancellationToken.None)
+
+    abstract member CreateDefaultFunction: ModuleFile * CancellationToken -> IJavaScriptObject
+
+    member this.CreateDefaultFunction(file: ModuleFile) : IJavaScriptObject =
+        this.CreateDefaultFunction(file, CancellationToken.None)
+
+    abstract member Engine: V8ScriptEngine
+    abstract member Runtime: JSRuntime
+    abstract member Json: V8JsonEngine
+
+    abstract member CreateError: string -> IJavaScriptObject
+
+    abstract member WrapHostFunction: (unit -> 'a) -> obj
+
+    abstract member WrapAsyncHostFunction: (unit -> Task<'a>) * ((unit -> Task) -> unit) -> obj
+
+    member this.WrapAsyncHostFunction(f: unit -> Task<'a>) =
+        this.WrapAsyncHostFunction(f, (fun runTask -> ignore (runTask ())))
+
+    abstract member RunJSFunction: IJavaScriptObject * obj[] * CancellationToken -> obj
+
+    member this.RunJSFunction(func: IJavaScriptObject, args: obj[]) : obj =
+        this.RunJSFunction(func, args, CancellationToken.None)
+
+    abstract member RunAsyncJSFunction: IJavaScriptObject * obj[] * CancellationToken -> Task<obj>
+
+    member this.RunAsyncJSFunction(func: IJavaScriptObject, args: obj[]) : Task<obj> =
+        this.RunAsyncJSFunction(func, args, CancellationToken.None)
+
 [<DefaultScriptUsage(ScriptAccess.None)>]
 type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
+    inherit AbstractJSEngine()
+
     let engine =
         runtime.Runtime.CreateScriptEngine(
             V8ScriptEngineFlags.DisableGlobalMembers
             ||| V8ScriptEngineFlags.EnableDateTimeConversion
-            ||| V8ScriptEngineFlags.EnableTaskPromiseConversion
-            ||| V8ScriptEngineFlags.EnableValueTaskPromiseConversion
             ||| V8ScriptEngineFlags.HideHostExceptions
             ||| V8ScriptEngineFlags.EnableStringifyEnhancements
         )
@@ -380,7 +409,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         engine.EnableRuntimeInterruptPropagation <- true
         engine.DocumentSettings.Loader <- loader
         engine.AddHostObject("engine", HostItemFlags.PrivateAccess, this)
-        // engine.AddHostType("console", typeof<Console>)
+        engine.AddHostType("console", typeof<Console>)
         ignore <| engine.Evaluate(preludeDoc.GetValue(runtime))
 
     let jsonEngine = V8JsonEngine(engine)
@@ -389,37 +418,28 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
     // go through JS, because ClearScript doesn't allow to set internal object fields.
     let weakMapConstructor = engine.Global.["WeakMap"] :?> IJavaScriptObject
     let errorConstructor = engine.Global.["Error"] :?> IJavaScriptObject
-
-    let wrappedHostExceptionConstructor =
-        engine.Global.["WrappedHostException"] :?> IJavaScriptObject
-
-    let wrappedHostPromiseConstructor =
-        engine.Global.["WrappedHostPromise"] :?> IJavaScriptObject
+    let promiseConstructor = engine.Global.["Promise"] :?> IJavaScriptObject
+    let throwException = engine.Global.["throwException"] :?> IJavaScriptObject
 
     let enrichedExceptionsMap =
         engine.Global.["enrichedExceptionsMap"] :?> IJavaScriptObject
 
-    let prepareStackTraceFlags =
-        engine.Global.["prepareStackTraceFlags"] :?> IJavaScriptObject
+    let getStackTrace = engine.Global.["getStackTrace"] :?> IJavaScriptObject
 
     do
-        ignore <| engine.Global.DeleteProperty("WrappedHostException")
-        ignore <| engine.Global.DeleteProperty("WrappedHostPromise")
         ignore <| engine.Global.DeleteProperty("enrichedExceptionsMap")
         ignore <| engine.Global.DeleteProperty("prepareStackTraceFlags")
+        ignore <| engine.Global.DeleteProperty("getStackTrace")
 
-    let mutable currentJSExceptionsMap: IJavaScriptObject option = None
-    let mutable interruptEDI: ExceptionDispatchInfo option = None
-    let mutable currentCancellationToken: CancellationToken option = None
-    let exceptionsMap = ConditionalWeakTable<exn, IJavaScriptObject>()
-
+    let jsExceptionsMap = AsyncLocal<IJavaScriptObject>()
+    let interruptEDI = AsyncLocal<ExceptionDispatchInfo ref>()
+    let exceptionsMap = AsyncLocal<ConditionalWeakTable<exn, obj>>()
     let asyncStackTrace = AsyncLocal<string>()
-    let pendingTasks = AsyncLocal<Collections.Generic.HashSet<Task>>()
 
-    let createError (message: string) =
+    let createError (message: obj) =
         errorConstructor.Invoke(true, message) :?> IJavaScriptObject
 
-    let wrapJSException (innerException: exn) (jsExc: IJavaScriptObject option) =
+    let wrapEvaluationException (innerException: exn) (jsExc: IJavaScriptObject option) =
         let (userData, errorMessage) =
             match jsExc with
             | Some jsExc ->
@@ -451,93 +471,94 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         | Some msg -> JavaScriptRuntimeException(msg, innerException, true, userData, true)
         | None -> JavaScriptRuntimeException("", innerException, true, userData, false)
 
-    let rec findPreviousExceptionJSObject (e: exn) =
-        match exceptionsMap.TryGetValue(e) with
+    [<TailCall>]
+    let rec findPreviousJSException (e: exn) =
+        let excMap = exceptionsMap.Value
+
+        match excMap.TryGetValue(e) with
         | (true, obj) ->
-            ignore <| exceptionsMap.Remove(e)
+            ignore <| excMap.Remove(e)
             Some obj
         | (false, _) ->
             match e.InnerException with
             | null -> None
-            | ie -> findPreviousExceptionJSObject ie
+            | ie -> findPreviousJSException ie
 
-    let getHostExceptionJSObject (e: exn) =
-        match findPreviousExceptionJSObject e with
+    let hostExceptionToJSException (e: exn) =
+        match findPreviousJSException e with
         | Some obj -> obj
         | None ->
             match e with
             | :? JSException as e -> e.Value
-            | :? ScriptEngineException as e when not <| isNull e.ScriptExceptionAsObject ->
-                e.ScriptExceptionAsObject :?> IJavaScriptObject
+            | :? ScriptEngineException as e when not e.IsFatal ->
+                match e.ScriptExceptionAsObject with
+                | :? IJavaScriptObject as obj -> obj
+                | null -> createError (fullUserMessage e)
+                | exc -> createError exc
             | e -> createError (fullUserMessage e)
 
-    let handleHostExceptionInJS (hostException: exn) =
-        let interrupt (e: exn) =
-            match interruptEDI with
-            | Some oldE -> oldE.Throw()
-            | None ->
-                let edi = ExceptionDispatchInfo.Capture(e)
-                interruptEDI <- Some edi
-                engine.Interrupt()
-                edi.Throw()
-
-            failwith "Impossible"
-
+    let hostEDIToJSException (edi: ExceptionDispatchInfo) =
         try
-            let error =
-                match hostException with
-                | :? OperationCanceledException as e -> interrupt e
-                | :? ScriptEngineException as e when e.IsFatal -> interrupt e
-                | e -> getHostExceptionJSObject e
+            let error = hostExceptionToJSException edi.SourceException
+            let jsExcMap = jsExceptionsMap.Value
 
-            let jsExceptionsMap = Option.get currentJSExceptionsMap
-
-            ignore
-            <| jsExceptionsMap.InvokeMethod("set", error, ExceptionDispatchInfo.Capture(hostException))
+            ignore <| jsExcMap.InvokeMethod("set", error, edi)
 
             error
         with
-        | :? OperationCanceledException as e -> interrupt e
-        | :? ScriptEngineException as e when e.IsFatal -> interrupt e
+        | IsInterrupt e -> this.RethrowInterrupt e
         | e ->
             Log.Error(e, "Unexpected exception while saving the original exception.")
             reraise ()
 
-    let tryRestoreJSException (jsException: exn) =
-        match jsException with
+    let tryRethrowPreviousHostExceptionFromJS (jsException: obj) =
+        try
+            let jsExcMap = jsExceptionsMap.Value
+            let excMap = exceptionsMap.Value
+
+            match jsExcMap.InvokeMethod("get", jsException) with
+            | :? ExceptionDispatchInfo as edi ->
+                ignore <| jsExcMap.InvokeMethod("delete", jsException)
+                excMap.AddOrUpdate(edi.SourceException, jsException)
+                edi.Throw()
+            | _ -> ()
+        with :? ScriptEngineException as e when e.IsFatal ->
+            runtime.SetMetMemoryLimit()
+            reraise ()
+
+    let tryRethrowPreviousHostException (e: exn) =
+        match e with
         | :? ScriptEngineException as e when e.IsFatal -> runtime.SetMetMemoryLimit()
         | _ -> ()
 
-        match interruptEDI with
-        | Some edi -> edi.Throw()
-        | None -> ()
+        match interruptEDI.Value.Value with
+        | null -> ()
+        | edi -> edi.Throw()
 
-        match jsException with
+        match e with
         | :? ScriptEngineException as e when not e.IsFatal && not <| isNull e.ScriptExceptionAsObject ->
-            let jsExc = e.ScriptExceptionAsObject :?> IJavaScriptObject
-
-            let maybeEdi =
-                try
-                    let jsExceptionsMap = Option.get currentJSExceptionsMap
-
-                    match jsExceptionsMap.InvokeMethod("get", jsExc) with
-                    | :? ExceptionDispatchInfo as edi ->
-                        ignore <| jsExceptionsMap.InvokeMethod("delete", jsExc)
-                        Some edi
-                    | _ -> None
-                with :? ScriptEngineException as e when e.IsFatal ->
-                    runtime.SetMetMemoryLimit()
-                    reraise ()
-
-            match maybeEdi with
-            | Some edi ->
-                exceptionsMap.AddOrUpdate(edi.SourceException, jsExc)
-                edi.Throw()
-            | None -> exceptionsMap.AddOrUpdate(jsException, jsExc)
+            tryRethrowPreviousHostExceptionFromJS e.ScriptExceptionAsObject
+            exceptionsMap.Value.AddOrUpdate(e, e.ScriptExceptionAsObject)
         | _ -> ()
+
+    member inline private this.RethrowInterrupt<'a>(e: exn) : 'a =
+        let edi = lazy (ExceptionDispatchInfo.Capture(e))
+        let intEDI = interruptEDI.Value
+
+        while true do
+            match intEDI.Value with
+            | null ->
+                if isNull <| Interlocked.CompareExchange(&intEDI.contents, null, edi.Value) then
+                    engine.Interrupt()
+                    edi.Value.Throw()
+            | oldE -> oldE.Throw()
+
+        failwith "Impossible"
 
     [<ScriptUsage(ScriptAccess.Full)>]
     member private this.EnrichStackTrace(stack: string) =
+        eprintfn "Enriching the stack trace"
+
         if obj.ReferenceEquals(asyncStackTrace.Value, null) then
             stack
         else
@@ -565,136 +586,118 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                 return null
             })
 
-    member inline private this.EvaluateJS<'a>
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member private this.ThrowHostException(message: string) =
+        this.WrapHostFunction(fun () -> raise <| JavaScriptRuntimeException(message))
+
+    member inline private this.EvaluateJS
         (cancellationToken: CancellationToken)
-        ([<InlineIfLambda>] f: unit -> 'a)
-        : 'a =
+        ([<InlineIfLambda>] f: unit -> obj)
+        : obj =
         let inline run () =
+            // This is not only called recursively when evaluating sync JS,
+            // but also to continue an async computation, when there is no nested JS
+            // evaluation happening and so, no handle is registered yet.
+            // To simplify this, simply always register one.
+            cancellationToken.ThrowIfCancellationRequested()
+            use handle = cancellationToken.UnsafeRegister((fun _ -> engine.Interrupt()), null)
+
             try
                 try
                     f ()
                 with e ->
-                    tryRestoreJSException e
+                    tryRethrowPreviousHostException e
                     reraise ()
             with
             | :? ScriptEngineException as e ->
                 let jsExc =
-                    if e.IsFatal || isNull e.ScriptExceptionAsObject then
-                        None
-                    else
-                        Some(e.ScriptExceptionAsObject :?> IJavaScriptObject)
+                    match e.ScriptExceptionAsObject with
+                    | :? IJavaScriptObject as obj when not e.IsFatal -> Some obj
+                    | _ -> None
 
-                raise <| wrapJSException e jsExc
-            | :? JSException as e -> raise <| wrapJSException e (Some e.Value)
+                raise <| wrapEvaluationException e jsExc
+            | :? JSException as e -> raise <| wrapEvaluationException e (Some e.Value)
 
-        match currentCancellationToken with
-        | None ->
-            currentCancellationToken <- Some cancellationToken
-            currentJSExceptionsMap <- Some(weakMapConstructor.Invoke(true) :?> IJavaScriptObject)
-
+        match exceptionsMap.Value with
+        | null ->
             try
-                use handle = cancellationToken.UnsafeRegister((fun _ -> engine.Interrupt()), null)
+                exceptionsMap.Value <- ConditionalWeakTable()
+                jsExceptionsMap.Value <- weakMapConstructor.Invoke(true) :?> IJavaScriptObject
+                interruptEDI.Value <- ref null
+
                 run ()
             finally
-                currentCancellationToken <- None
-                currentJSExceptionsMap <- None
-                interruptEDI <- None
-                exceptionsMap.Clear()
-        | Some otherCancellationToken ->
-            if
-                cancellationToken <> CancellationToken.None
-                && cancellationToken <> otherCancellationToken
-            then
-                failwith "Nested cancellation tokens are not supported"
+                exceptionsMap.Value <- null
+                jsExceptionsMap.Value <- null
+                interruptEDI.Value <- Unchecked.defaultof<_>
+        | _ -> run ()
 
-            run ()
-
-    member inline private this.EvaluateAsyncJS<'a>
+    member inline private this.EvaluateAsyncJS
         (cancellationToken: CancellationToken)
-        ([<InlineIfLambda>] f: unit -> Task<'a>)
-        : Task<'a> =
+        ([<InlineIfLambda>] f: unit -> obj)
+        : Task<obj> =
         task {
-            let inline run () =
+            let inline run () : Task<obj> =
                 task {
-                    // We collect all the tasks that are spawned during the execution of this function,
-                    // and make sure they all finish.
-                    // This way we avoid leaking tasks that can even cross to the next evaluation.
-                    let newPendingTasks = Collections.Generic.HashSet()
-                    pendingTasks.Value <- newPendingTasks
-
-                    use _ =
-                        Task.toDisposable
-                        <| fun () ->
-                            task {
-                                while newPendingTasks.Count > 0 do
-                                    let task = newPendingTasks |> Seq.first |> Option.get
-
-                                    try
-                                        do! task
-                                    with _ ->
-                                        ()
-
-                                    ignore <| newPendingTasks.Remove(task)
-                            }
+                    cancellationToken.ThrowIfCancellationRequested()
+                    use handle = cancellationToken.UnsafeRegister((fun _ -> engine.Interrupt()), null)
 
                     try
-                        try
-                            return! f ()
-                        with e ->
-                            tryRestoreJSException e
-                            return reraise' e
+                        let! maybeResult =
+                            task {
+                                try
+                                    eprintfn "Running the initial function"
+                                    let result = f ()
+                                    eprintfn "Finished running the initial function"
+
+                                    match result with
+                                    | :? IJavaScriptObject as promise when promise.Kind = JavaScriptObjectKind.Promise ->
+                                        let resultSource = TaskCompletionSource<Result<obj, obj>>()
+                                        eprintfn "Invoking then"
+
+                                        ignore
+                                        <| promise.InvokeMethod(
+                                            "then",
+                                            // Not converting these to Actions result in no methods invoked D:
+                                            Action<obj>(fun (result: obj) ->
+                                                eprintfn "Setting the end result"
+                                                resultSource.SetResult(Ok result)),
+                                            Action<obj>(fun (reason: obj) ->
+                                                eprintfn "Setting the end exception"
+                                                resultSource.SetResult(Error reason))
+                                        )
+
+                                        return! resultSource.Task.WaitAsync(cancellationToken)
+                                    | _ -> return (Ok result)
+                                with e ->
+                                    tryRethrowPreviousHostException e
+                                    return reraise' e
+                            }
+
+                        match maybeResult with
+                        | (Ok result) -> return result
+                        | (Error reason) ->
+                            tryRethrowPreviousHostExceptionFromJS reason
+                            ignore <| throwException.InvokeAsFunction(reason)
+                            return failwith "Impossible"
                     with
                     | :? ScriptEngineException as e ->
                         let jsExc =
-                            if e.IsFatal || isNull e.ScriptExceptionAsObject then
-                                None
-                            else
-                                Some(e.ScriptExceptionAsObject :?> IJavaScriptObject)
+                            match e.ScriptExceptionAsObject with
+                            | :? IJavaScriptObject as obj when not e.IsFatal -> Some obj
+                            | _ -> None
 
-                        return raise <| wrapJSException e jsExc
-                    | :? JSException as e -> return raise <| wrapJSException e (Some e.Value)
+                        return raise <| wrapEvaluationException e jsExc
+                    | :? JSException as e -> return raise <| wrapEvaluationException e (Some e.Value)
                 }
 
-            match currentCancellationToken with
-            | None ->
-                currentCancellationToken <- Some cancellationToken
-                currentJSExceptionsMap <- Some(weakMapConstructor.Invoke(true) :?> IJavaScriptObject)
-
-                try
-                    // We have observed a bug in ClearScript when a task for a cancelled JavaScript
-                    // evaluation is never cancelled. Explicitly subscribing to the cancellation
-                    // token like that seems to solve the issue.
-                    let cancelledTask = TaskCompletionSource()
-
-                    use handle =
-                        cancellationToken.UnsafeRegister(
-                            (fun _ ->
-                                engine.Interrupt()
-                                cancelledTask.SetCanceled()),
-                            null
-                        )
-
-                    let runTask = run ()
-                    let! successful = Task.WhenAny(runTask :> Task, cancelledTask.Task)
-
-                    if successful = cancelledTask.Task then
-                        cancellationToken.ThrowIfCancellationRequested()
-                        return failwith "Impossible"
-                    else
-                        return! runTask
-                finally
-                    currentCancellationToken <- None
-                    currentJSExceptionsMap <- None
-                    interruptEDI <- None
-                    exceptionsMap.Clear()
-            | Some otherCancellationToken ->
-                if
-                    cancellationToken <> CancellationToken.None
-                    && cancellationToken <> otherCancellationToken
-                then
-                    failwith "Nested cancellation tokens are not supported"
-
+            match exceptionsMap.Value with
+            | null ->
+                exceptionsMap.Value <- ConditionalWeakTable()
+                jsExceptionsMap.Value <- weakMapConstructor.Invoke(true) :?> IJavaScriptObject
+                interruptEDI.Value <- ref null
                 return! run ()
+            | _ -> return! run ()
         }
 
     // As far as I understand, ClearScript doesn't have any way to compile modules and then
@@ -702,20 +705,21 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
     // Instead, they cache Module instances by the source code digests, and there's
     // no way to call `Instantiate()`.
     // We evaluate them immediately instead.
-    member this.CreateModule(file: ModuleFile) : IJavaScriptObject =
+    override this.CreateModule(file: ModuleFile, cancellationToken: CancellationToken) : IJavaScriptObject =
         let info = DocumentInfo(file.Path, Category = ModuleCategory.Standard)
         let doc = StringDocument(info, file.Source)
 
-        this.EvaluateJS CancellationToken.None
-        <| fun () ->
-            let glob = engine.Script :?> IDictionary<string, obj>
-            // First evaluation; needed because we don't want to expose our internals,
-            // and the evaluations are cached.
-            let snippetInfo = DocumentInfo("import.js", Category = ModuleCategory.Standard)
-            loader.CurrentModule <- Some doc
+        let ret =
+            this.EvaluateJS cancellationToken
+            <| fun () ->
+                let glob = engine.Script :?> IDictionary<string, obj>
 
-            try
-                ignore <| engine.Evaluate(snippetInfo, "import '__current__'")
+                let snippetInfo = DocumentInfo("import.js", Category = ModuleCategory.Standard)
+
+                // First evaluation; needed because we don't want to expose our internals,
+                // and the evaluations are cached.
+                ignore
+                <| loader.WithCurrentModuleOnce(doc, (fun () -> engine.Evaluate(snippetInfo, "import '__current__'")))
                 // Careful to not remove something that the user set up.
                 let oldCurrent =
                     match glob.TryGetValue("current") with
@@ -723,117 +727,96 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                     | (false, _) -> None
 
                 try
-                    // Rearm the current module.
-                    loader.CurrentModule <- Some doc
                     // We expect no re-evaluation to occur here.
                     ignore
-                    <| engine.Evaluate(
-                        snippetInfo,
-                        """
+                    <| loader.WithCurrentModuleOnce(
+                        doc,
+                        fun () ->
+                            engine.Evaluate(
+                                snippetInfo,
+                                """
                         import * as current from '__current__';
                         globalThis.current = current;
                     """
+                            )
                     )
 
-                    glob.["current"] :?> IJavaScriptObject
+                    glob.["current"]
                 finally
                     match oldCurrent with
                     | Some current -> glob.["current"] <- current
                     | None -> ignore <| glob.Remove("current")
-            finally
-                loader.CurrentModule <- None
 
-    member this.CreateDefaultFunction(file: ModuleFile) : IJavaScriptObject =
-        let jsModule = this.CreateModule file
+        ret :?> IJavaScriptObject
+
+    override this.CreateDefaultFunction(file: ModuleFile, cancellationToken: CancellationToken) : IJavaScriptObject =
+        let jsModule = this.CreateModule(file, cancellationToken)
 
         match jsModule.GetProperty("default") with
         | :? IJavaScriptObject as obj when obj.Kind = JavaScriptObjectKind.Function -> obj
         | _ -> raisef JavaScriptRuntimeException "Invalid default function"
 
-    member this.Engine = engine
-    member this.Runtime = runtime
-    member this.Json = jsonEngine
+    override this.Engine = engine
+    override this.Runtime = runtime
+    override this.Json = jsonEngine
 
-    member this.CreateError message = createError message
+    override this.CreateError message = createError message
 
-    member this.WrapHostFunction(f: unit -> 'a) =
+    override this.WrapHostFunction(f: unit -> 'a) =
         try
             f () :> obj
-        with e ->
-            let error = handleHostExceptionInJS e
-            wrappedHostExceptionConstructor.Invoke(true, error)
+        with
+        | IsInterrupt e -> this.RethrowInterrupt e
+        | e ->
+            let error = hostEDIToJSException <| ExceptionDispatchInfo.Capture(e)
+            throwException.InvokeAsFunction(error)
 
-    member this.WrapAsyncHostFunction(f: unit -> Task<'a>) =
-        prepareStackTraceFlags.SetProperty("inHostGetStackTrace", true)
+    override this.WrapAsyncHostFunction(f: unit -> Task<'a>, wrapTask: (unit -> Task) -> unit) =
+        let stack = getStackTrace.InvokeAsFunction() :?> string
 
-        let stack =
-            try
-                engine.GetStackTrace()
-            finally
-                prepareStackTraceFlags.SetProperty("inHostGetStackTrace", false)
-
-        wrappedHostPromiseConstructor.Invoke(
+        promiseConstructor.Invoke(
             true,
             Action<_, _>(fun (resolve: IJavaScriptObject) (reject: IJavaScriptObject) ->
-                let myPendingTasks = pendingTasks.Value
-
-                if isNull myPendingTasks then
-                    raisef JavaScriptRuntimeException "Async functions are not allowed here"
-
-                let mutable runTask: Task = null
-
-                runTask <-
+                wrapTask
+                <| fun () ->
                     task {
+                        asyncStackTrace.Value <- stack
+
+                        let! result =
+                            task {
+                                try
+                                    let! ret = f ()
+                                    return Ok ret
+                                with
+                                | IsInterrupt e -> return this.RethrowInterrupt e
+                                | e -> return Error(ExceptionDispatchInfo.Capture(e))
+                            }
+                        // We don't expect any JavaScript exceptions but the fatal ones here.
                         try
-                            let! ret =
-                                task {
-                                    asyncStackTrace.Value <- stack
-
-                                    try
-                                        let! ret = f ()
-                                        return Ok ret
-                                    with e ->
-                                        let jsExc = handleHostExceptionInJS e
-                                        return Error jsExc
-                                }
-
-                            ignore
-                            <| match ret with
-                               | Ok r -> resolve.InvokeAsFunction(r)
-                               | Error e -> reject.InvokeAsFunction(e)
-                        finally
-                            // Might be `null` is the task is finished immediately.
-                            if not <| isNull runTask then
-                                ignore <| myPendingTasks.Remove(runTask)
-                    }
-
-                if not <| runTask.IsCompleted then
-                    ignore <| myPendingTasks.Add(runTask))
+                            match result with
+                            | Ok r -> ignore <| resolve.InvokeAsFunction(r)
+                            | Error e ->
+                                let jsE = hostEDIToJSException e
+                                ignore <| reject.InvokeAsFunction(jsE)
+                        with :? ScriptEngineException as e when e.IsFatal ->
+                            runtime.SetMetMemoryLimit()
+                            reraise' e
+                    })
         )
 
-    member this.RunJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) : obj =
+    override this.RunJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) : obj =
         if func.Engine <> engine then
             failwith "Function belongs to another engine"
 
         this.EvaluateJS cancellationToken <| fun () -> func.InvokeAsFunction(args)
 
-    member this.RunJSFunction(func: IJavaScriptObject, args: obj[]) : obj =
-        this.RunJSFunction(func, args, CancellationToken.None)
-
-    member this.RunAsyncJSFunction
+    override this.RunAsyncJSFunction
         (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
         : Task<obj> =
         if func.Engine <> engine then
             failwith "Function belongs to another engine"
 
-        this.EvaluateAsyncJS cancellationToken
-        <| fun () ->
-            match func.InvokeAsFunction(args) with
-            | :? Task<obj> as t -> t
-            | ret -> Task.result (ret)
-
-    member this.RunAsyncJSFunction(func: IJavaScriptObject, args: obj[]) : Task<obj> =
-        this.RunAsyncJSFunction(func, args, CancellationToken.None)
+        this.EvaluateAsyncJS cancellationToken <| fun () -> func.InvokeAsFunction(args)
 
 // ClearScript doesn't allow you to set the `ScriptException` externally,
 // so we need our own type of an exception for that.
@@ -851,3 +834,55 @@ and JSException(message: string, value: IJavaScriptObject, innerException: exn) 
         JSException(message, error, null)
 
     member this.Value = value
+
+type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>
+    (engine: AbstractJSEngine, constructScheduler: unit -> 's) =
+    inherit AbstractJSEngine()
+
+    let scheduler = AsyncLocal<'s>()
+
+    member this.Scheduler: 's option =
+        let currScheduler = scheduler.Value
+        if isRefNull currScheduler then None else Some currScheduler
+
+    member this.WrappedEngine = engine
+
+    override this.Engine = engine.Engine
+    override this.Runtime = engine.Runtime
+    override this.Json = engine.Json
+
+    override this.CreateModule(file: ModuleFile, cancellationToken: CancellationToken) : IJavaScriptObject =
+        engine.CreateModule(file, cancellationToken)
+
+    override this.CreateDefaultFunction(file: ModuleFile, cancellationToken: CancellationToken) : IJavaScriptObject =
+        engine.CreateDefaultFunction(file, cancellationToken)
+
+    override this.CreateError(message: string) : IJavaScriptObject = engine.CreateError(message)
+
+    override this.WrapHostFunction(f: unit -> 'a) : obj = engine.WrapHostFunction(f)
+
+    override this.WrapAsyncHostFunction(f: unit -> Task<'a>, wrapTask: (unit -> Task) -> unit) : obj =
+        engine.WrapAsyncHostFunction(
+            f,
+            fun runTask ->
+                wrapTask (fun () ->
+                    let currScheduler = scheduler.Value
+
+                    if isRefNull currScheduler then
+                        runTask ()
+                    else
+                        currScheduler.Post(runTask))
+        )
+
+    override this.RunJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) : obj =
+        engine.RunJSFunction(func, args, cancellationToken)
+
+    override this.RunAsyncJSFunction
+        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
+        : Task<obj> =
+        task {
+            let currScheduler = constructScheduler ()
+            scheduler.Value <- currScheduler
+            use _ = Task.toDisposable <| fun () -> currScheduler.WaitAll(cancellationToken)
+            return! engine.RunAsyncJSFunction(func, args, cancellationToken)
+        }
