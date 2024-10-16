@@ -54,11 +54,22 @@ type private APIHandle(api: IOzmaDBAPI) =
 
 let private preludeSource =
     """
-    const apiProxy = globalThis.apiProxy;
-    delete globalThis.apiProxy;
+    const unwrappedApiProxy = globalThis.unwrappedApiProxy;
+    delete globalThis.unwrappedApiProxy;
+    delete globalThis.unwrapHostResult;
+    delete globalThis.wrapHostFunction;
+    const wrapHostObject = globalThis.wrapHostObject;
+    delete globalThis.wrapHostObject;
+
+    const apiProxy = wrapHostObject(unwrappedApiProxy);
+
+    const objectValues = Object.values;
+    const objectAssign = Object.assign;
+    const objectFreeze = Object.freeze;
+    const arrayMap = Array.prototype.map;
 
     const findInnerByKey = (object, key) => {
-        for (const value of Object.values(object)) {
+        for (const value of objectValues(object)) {
             if (typeof value === 'object' && value) {
                 const currValue = object[key];
                 if (currValue !== undefined) {
@@ -73,17 +84,17 @@ let private preludeSource =
     };
 
     class OzmaDBError extends Error {
-    constructor(body) {
-        super(body.message);
-        Object.assign(this, body);
-        // Find `userData` and bring it to the top-level.
-        if (!('userData' in body)) {
-            const userData = findInnerByKey(body, 'userData');
-            if (userData !== undefined) {
-                this.userData = userData;
+        constructor(body) {
+            super(body.message);
+            objectAssign(this, body);
+            // Find `userData` and bring it to the top-level.
+            if (!('userData' in body)) {
+                const userData = findInnerByKey(body, 'userData');
+                if (userData !== undefined) {
+                    this.userData = userData;
+                }
             }
         }
-    }
     };
 
     globalThis.OzmaDBError = OzmaDBError;
@@ -91,8 +102,8 @@ let private preludeSource =
     globalThis.FunDBError = OzmaDBError;
 
     globalThis.formatDate = (date) => date.toISOString().split('T')[0];
-    globalThis.formatOzmaQLName = (arg) => apiProxy.FormatOzmaQLName(arg);
-    globalThis.formatOzmaQLValue = (arg) => apiProxy.FormatOzmaQLValue(arg);
+    globalThis.formatOzmaQLName = apiProxy.FormatOzmaQLName;
+    globalThis.formatOzmaQLValue = apiProxy.FormatOzmaQLValue;
 
     // DEPRECATED
     globalThis.renderDate = globalThis.formatDate;
@@ -111,7 +122,7 @@ let private preludeSource =
 
     class OzmaDBCurrent {
         constructor() {
-            Object.freeze(this);
+            objectFreeze(this);
         }
 
         getUserView(source, args, chunk) {
@@ -136,7 +147,7 @@ let private preludeSource =
                     const inner = e.inner;
                     delete e.operation;
                     delete e.inner;
-                    Object.assign(e, inner);
+                    objectAssign(e, inner);
                 }
                 throw e;
             }
@@ -145,7 +156,7 @@ let private preludeSource =
         // DEPRECATED
         async insertEntities(entity, entries) {
             const ret = await this.insertEntries(entity, entries);
-            return ret.entries.map(entry => entry.id);
+            return arrayMap.call(ret.entries, entry => entry.id);
         }
 
         insertEntries(entity, entries) {
@@ -228,7 +239,7 @@ let private preludeSource =
         // DEPRECATED
         async insertEntities(entity, entries) {
             const ret = await this.insertEntries(entity, entries);
-            return ret.entries.map(entry => entry.id);
+            return arrayMap.call(ret.entries, entry => entry.id);
         }
 
         // DEPRECATED
@@ -270,7 +281,7 @@ type OzmaJSEngine(engine: JSEngine) as this =
     let apiHandle = AsyncLocal<APIHandle>()
 
     do
-        engine.Engine.AddHostObject("apiProxy", this)
+        engine.Engine.AddHostObject("unwrappedApiProxy", this)
         ignore <| engine.Engine.Evaluate(preludeDoc.GetValue(engine.Runtime))
 
     let errorConstructor = engine.Engine.Global.["OzmaDBError"] :?> IJavaScriptObject

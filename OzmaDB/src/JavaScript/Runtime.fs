@@ -221,38 +221,86 @@ type RuntimeLocal<'a when 'a: not struct>(create: JSRuntime -> 'a) =
 
 let private preludeSource =
     """
-    const engine = globalThis.engine;
-    // delete globalThis.engine;
+    const unwrappedEngine = globalThis.unwrappedEngine;
+    delete globalThis.unwrappedEngine;
+    const enrichStackTrace = unwrappedEngine.EnrichStackTrace;
+
     // Can't delete `gc`; unset it this way instead.
     globalThis.gc = undefined;
 
     const Promise = globalThis.Promise;
     const OldError = globalThis.Error;
+    const stringMatch = String.prototype.match;
     const errorToString = OldError.prototype.toString;
     const arrayJoin = Array.prototype.join;
+    const oldCaptureStackTrace = OldError.captureStackTrace;
+
+    // Needed because ClearScript doesn't allow to throw unchanged JavaScript exceptions
+    // from a host function.
+    // If we make a `throwException` function which throws from JS instead, the
+    // exception will get altered while passing through the host function which
+    // called it, and we lose the EDI assosiaced with it.
+    // Instead we pass the host return values through `unwrapHostResult`, which
+    // may rethrow.
+    class WrappedHostException {
+        constructor(e) {
+            this.e = e;
+        }
+    }
+    globalThis.WrappedHostException = WrappedHostException;
+
+    const unwrapHostResult = (ret) => {
+        if (ret instanceof WrappedHostException) {
+            throw ret.e;
+        } else {
+            return ret;
+        }
+    };
+    globalThis.unwrapHostResult = unwrapHostResult;
 
     const namedFunction = (name, f) => {
         Object.defineProperty(f, "name", { value: name });
         return f;
     };
 
+    const wrapHostFunction = (func) => namedFunction(func.name, function(...args) {
+        const ret = func(...args);
+        return unwrapHostResult(ret);
+    });
+    globalThis.wrapHostFunction = wrapHostFunction;
+
+    const wrapHostObject = (obj) => {
+        const newObj = {};
+        for (const key of Object.getOwnPropertyNames(obj)) {
+            const value = obj[key];
+            if (typeof value === 'function') {
+                newObj[key] = wrapHostFunction(value);
+            }
+        }
+        return newObj;
+    };
+    globalThis.wrapHostObject = wrapHostObject;
+
+    // Enable this if you need to debug something.
+    // globalThis.engine = wrapHostObject(unwrappedEngine);
+
     const enrichedExceptionsMap = new WeakMap();
     globalThis.enrichedExceptionsMap = enrichedExceptionsMap;
 
-    globalThis.throwException = (exc) => {
+    const throwException = (exc) => {
         throw exc;
     };
+    globalThis.throwException = throwException;
 
     // Unfortunately, V8 doesn't have any hook to call on any error,
     // and doesn't have any way to patch it completely.
     // Even with all this, all the errors emitted by the engine itself
     // are not updated.
     const updateError = (error) => {
-        error.stack = engine.EnrichStackTrace(error.stack);
+        error.stack = enrichStackTrace(error.stack);
         enrichedExceptionsMap.set(error, true);
     };
 
-    const oldCaptureStackTrace = globalThis.Error.captureStackTrace;
     const captureStackTrace = (targetObject, ...args) => {
         oldCaptureStackTrace(targetObject, ...args);
         updateError(targetObject);
@@ -307,7 +355,7 @@ let private preludeSource =
             }
             const functionName = frame.getFunctionName();
             // Hide the wrapped Error.
-            if (fileName === "prelude.js" && (functionName === "Error" || functionName.match(errorRegex) || functionName === "getStackTrace")) {
+            if (fileName === "prelude.js" && (functionName === "Error" || (typeof functionName === "string" && stringMatch.call(functionName, errorRegex)) || functionName === "getRawStackTrace")) {
                 return false;
             }
             return true;
@@ -318,18 +366,16 @@ let private preludeSource =
     // There is an issue when using ClearScript's `GetStackTrace()`:
     // It automatically skips the first two frames, and because of our `prepareStackTrace`
     // function, we end up removing more than we should.
-    // Instead, implement our own `getStackTrace` which works in the same way.
-    const getStackTrace = () => {
+    // Instead, implement our own `getRawStackTrace` which works in the same way.
+    const getRawStackTrace = () => {
         try {
             throw new Error('[stack trace]');
         }
         catch (e) {
-            const stack = e.stack;
-            // Remove the first line.
-            return stack.substring(stack.indexOf('\n') + 1, stack.length);
+            return e.stack;
         }
     };
-    globalThis.getStackTrace = getStackTrace;
+    globalThis.getRawStackTrace = getRawStackTrace;
 """
 
 let private preludeDoc =
@@ -408,8 +454,8 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
     do
         engine.EnableRuntimeInterruptPropagation <- true
         engine.DocumentSettings.Loader <- loader
-        engine.AddHostObject("engine", HostItemFlags.PrivateAccess, this)
-        engine.AddHostType("console", typeof<Console>)
+        engine.AddHostObject("unwrappedEngine", HostItemFlags.PrivateAccess, this)
+        // engine.AddHostType("console", typeof<Console>)
         ignore <| engine.Evaluate(preludeDoc.GetValue(runtime))
 
     let jsonEngine = V8JsonEngine(engine)
@@ -419,17 +465,22 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
     let weakMapConstructor = engine.Global.["WeakMap"] :?> IJavaScriptObject
     let errorConstructor = engine.Global.["Error"] :?> IJavaScriptObject
     let promiseConstructor = engine.Global.["Promise"] :?> IJavaScriptObject
+
     let throwException = engine.Global.["throwException"] :?> IJavaScriptObject
+
+    let wrappedHostExceptionConstructor =
+        engine.Global.["WrappedHostException"] :?> IJavaScriptObject
 
     let enrichedExceptionsMap =
         engine.Global.["enrichedExceptionsMap"] :?> IJavaScriptObject
 
-    let getStackTrace = engine.Global.["getStackTrace"] :?> IJavaScriptObject
+    let getRawStackTrace = engine.Global.["getRawStackTrace"] :?> IJavaScriptObject
 
     do
+        ignore <| engine.Global.DeleteProperty("throwException")
+        ignore <| engine.Global.DeleteProperty("WrappedHostException")
         ignore <| engine.Global.DeleteProperty("enrichedExceptionsMap")
-        ignore <| engine.Global.DeleteProperty("prepareStackTraceFlags")
-        ignore <| engine.Global.DeleteProperty("getStackTrace")
+        ignore <| engine.Global.DeleteProperty("getRawStackTrace")
 
     let jsExceptionsMap = AsyncLocal<IJavaScriptObject>()
     let interruptEDI = AsyncLocal<ExceptionDispatchInfo ref>()
@@ -438,6 +489,11 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
     let createError (message: obj) =
         errorConstructor.Invoke(true, message) :?> IJavaScriptObject
+
+    let getStackTrace () =
+        let rawTrace = getRawStackTrace.InvokeAsFunction() :?> string
+        // Remove the first line.
+        rawTrace.Substring(rawTrace.IndexOf('\n') + 1)
 
     let wrapEvaluationException (innerException: exn) (jsExc: IJavaScriptObject option) =
         let (userData, errorMessage) =
@@ -502,7 +558,6 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
             let error = hostExceptionToJSException edi.SourceException
             let jsExcMap = jsExceptionsMap.Value
 
-            eprintfn "Remembering an exception: %s" edi.SourceException.Message
             ignore <| jsExcMap.InvokeMethod("set", error, edi)
 
             error
@@ -519,7 +574,6 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
             match jsExcMap.InvokeMethod("get", jsException) with
             | :? ExceptionDispatchInfo as edi ->
-                eprintfn "Found a previous exception: %s" edi.SourceException.Message
                 ignore <| jsExcMap.InvokeMethod("delete", jsException)
                 excMap.AddOrUpdate(edi.SourceException, jsException)
                 edi.Throw()
@@ -559,12 +613,14 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
     [<ScriptUsage(ScriptAccess.Full)>]
     member private this.EnrichStackTrace(stack: string) =
-        if obj.ReferenceEquals(asyncStackTrace.Value, null) then
+        let currTrace = asyncStackTrace.Value
+
+        if obj.ReferenceEquals(currTrace, null) then
             stack
         else
             seq {
                 yield stack
-                yield asyncStackTrace.Value
+                yield currTrace
             }
             |> String.concat ",\n"
 
@@ -660,10 +716,8 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                         <| promise.InvokeMethod(
                                             "then",
                                             // Not converting these to Actions result in no methods invoked D:
-                                            Action<obj>(fun (result: obj) ->
-                                                resultSource.SetResult(Ok result)),
-                                            Action<obj>(fun (reason: obj) ->
-                                                resultSource.SetResult(Error reason))
+                                            Action<obj>(fun (result: obj) -> resultSource.SetResult(Ok result)),
+                                            Action<obj>(fun (reason: obj) -> resultSource.SetResult(Error reason))
                                         )
 
                                         return! resultSource.Task.WaitAsync(cancellationToken)
@@ -768,11 +822,10 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         | IsInterrupt e -> this.RethrowInterrupt e
         | e ->
             let error = hostEDIToJSException <| ExceptionDispatchInfo.Capture(e)
-            eprintfn "Set a new exception, message: %s" ((error :?> IJavaScriptObject).GetProperty("message") :?> string)
-            throwException.InvokeAsFunction(error)
+            wrappedHostExceptionConstructor.Invoke(true, error)
 
     override this.WrapAsyncHostFunction(f: unit -> Task<'a>, wrapTask: (unit -> Task) -> unit) =
-        let stack = getStackTrace.InvokeAsFunction() :?> string
+        let stack = getStackTrace ()
 
         promiseConstructor.Invoke(
             true,
