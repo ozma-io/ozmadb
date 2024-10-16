@@ -502,6 +502,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
             let error = hostExceptionToJSException edi.SourceException
             let jsExcMap = jsExceptionsMap.Value
 
+            eprintfn "Remembering an exception: %s" edi.SourceException.Message
             ignore <| jsExcMap.InvokeMethod("set", error, edi)
 
             error
@@ -518,6 +519,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
             match jsExcMap.InvokeMethod("get", jsException) with
             | :? ExceptionDispatchInfo as edi ->
+                eprintfn "Found a previous exception: %s" edi.SourceException.Message
                 ignore <| jsExcMap.InvokeMethod("delete", jsException)
                 excMap.AddOrUpdate(edi.SourceException, jsException)
                 edi.Throw()
@@ -557,8 +559,6 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
     [<ScriptUsage(ScriptAccess.Full)>]
     member private this.EnrichStackTrace(stack: string) =
-        eprintfn "Enriching the stack trace"
-
         if obj.ReferenceEquals(asyncStackTrace.Value, null) then
             stack
         else
@@ -588,7 +588,11 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
     [<ScriptUsage(ScriptAccess.Full)>]
     member private this.ThrowHostException(message: string) =
-        this.WrapHostFunction(fun () -> raise <| JavaScriptRuntimeException(message))
+        this.WrapHostFunction(fun () -> raise <| Exception(message))
+
+    [<ScriptUsage(ScriptAccess.Full)>]
+    member private this.ThrowJSException(message: string) =
+        this.WrapHostFunction(fun () -> raise <| JSException(message, this))
 
     member inline private this.EvaluateJS
         (cancellationToken: CancellationToken)
@@ -646,24 +650,19 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                         let! maybeResult =
                             task {
                                 try
-                                    eprintfn "Running the initial function"
                                     let result = f ()
-                                    eprintfn "Finished running the initial function"
 
                                     match result with
                                     | :? IJavaScriptObject as promise when promise.Kind = JavaScriptObjectKind.Promise ->
                                         let resultSource = TaskCompletionSource<Result<obj, obj>>()
-                                        eprintfn "Invoking then"
 
                                         ignore
                                         <| promise.InvokeMethod(
                                             "then",
                                             // Not converting these to Actions result in no methods invoked D:
                                             Action<obj>(fun (result: obj) ->
-                                                eprintfn "Setting the end result"
                                                 resultSource.SetResult(Ok result)),
                                             Action<obj>(fun (reason: obj) ->
-                                                eprintfn "Setting the end exception"
                                                 resultSource.SetResult(Error reason))
                                         )
 
@@ -769,6 +768,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         | IsInterrupt e -> this.RethrowInterrupt e
         | e ->
             let error = hostEDIToJSException <| ExceptionDispatchInfo.Capture(e)
+            eprintfn "Set a new exception, message: %s" ((error :?> IJavaScriptObject).GetProperty("message") :?> string)
             throwException.InvokeAsFunction(error)
 
     override this.WrapAsyncHostFunction(f: unit -> Task<'a>, wrapTask: (unit -> Task) -> unit) =
