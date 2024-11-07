@@ -934,8 +934,16 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>
         (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
         : Task<obj> =
         task {
-            let currScheduler = constructScheduler ()
-            scheduler.Value <- currScheduler
-            use _ = Task.toDisposable <| fun () -> currScheduler.WaitAll(cancellationToken)
-            return! engine.RunAsyncJSFunction(func, args, cancellationToken)
+            let! retTask =
+                task {
+                    let currScheduler = constructScheduler ()
+                    scheduler.Value <- currScheduler
+                    use _ = Task.toDisposable <| fun () -> currScheduler.WaitAll(cancellationToken)
+                    return engine.RunAsyncJSFunction(func, args, cancellationToken)
+                }
+
+            if not retTask.IsCompleted then
+                raisef JavaScriptRuntimeException "The called function doesn't resolve to a response"
+
+            return! retTask
         }
