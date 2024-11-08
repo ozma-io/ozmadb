@@ -666,11 +666,15 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                     cancellationToken.ThrowIfCancellationRequested()
                     use handle = cancellationToken.UnsafeRegister((fun _ -> engine.Interrupt()), null)
 
+                    let randId = Random.Shared.Next()
+                    eprintfn "Evaluating async JS %d" randId
+
                     try
                         let! maybeResult =
                             task {
                                 try
                                     let result = f ()
+                                    eprintfn "Got first async result %d" randId
 
                                     match result with
                                     | :? IJavaScriptObject as promise when promise.Kind = JavaScriptObjectKind.Promise ->
@@ -685,12 +689,18 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                                 null
                                             )
 
+                                        eprintfn "Invoking then for %d" randId
+
                                         ignore
                                         <| promise.InvokeMethod(
                                             "then",
                                             // Not converting these to Actions result in no methods invoked D:
-                                            Action<obj>(fun result -> resultSource.SetResult(Ok result)),
-                                            Action<obj>(fun reason -> resultSource.SetResult(Error reason))
+                                            Action<obj>(fun result ->
+                                                eprintfn "Resolved %d" randId
+                                                resultSource.SetResult(Ok result)),
+                                            Action<obj>(fun reason ->
+                                                eprintfn "Rejected %d" randId
+                                                resultSource.SetResult(Error reason))
                                         )
 
                                         return! resultSource.Task.WaitAsync(cancellationToken)
@@ -699,6 +709,8 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                     tryRethrowPreviousHostException e
                                     return reraise' e
                             }
+
+                        eprintfn "Returning async JS %d" randId
 
                         match maybeResult with
                         | (Ok result) -> return result
