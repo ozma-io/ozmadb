@@ -939,6 +939,7 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
             Log.Debug("Starting async host task {id}", this.JSRequestID.Value)
 
             if isRefNull currScheduler then
+                Log.Debug("No scheduler for async host task {id}", this.JSRequestID.Value)
                 runTask ()
             else
                 currScheduler.Post(runTask)
@@ -970,12 +971,10 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
                 whenPromiseFinished ()
 
             let currScheduler = this.CreateScheduler()
+            scheduler.Value <- currScheduler
 
-            let! retTask =
-                task {
-                    scheduler.Value <- currScheduler
-                    return this.BaseRunAsyncJSFunction(func, args, newWhenPromiseFinished, cancellationToken)
-                }
+            let retTask =
+                this.BaseRunAsyncJSFunction(func, args, newWhenPromiseFinished, cancellationToken)
 
             Log.Debug("Waiting for all pending tasks in {id}", randId)
             do! currScheduler.WaitAll(cancellationToken)

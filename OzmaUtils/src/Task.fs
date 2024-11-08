@@ -71,6 +71,8 @@ type LastTaskRef() =
     let mutable lastTask = Task.CompletedTask
     let id = Random.Shared.Next()
 
+    do printfn "Creating a scheduled task ref, %d" id
+
     member this.Exchange(task: Task) : Task =
         printfn "Adding a scheduled task, %d" id
         Interlocked.Exchange(&lastTask, task)
