@@ -836,6 +836,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
     override this.WrapAsyncHostFunction(f: unit -> Task<'a>) =
         let stack = getStackTrace ()
+        let id = this.JSRequestID.Value
 
         promiseConstructor.Invoke(
             true,
@@ -856,11 +857,15 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                 }
                             // We don't expect any JavaScript exceptions but the fatal ones here.
                             try
+                                Log.Debug("Continuing async JS function {id}", id)
+
                                 match result with
                                 | Ok r -> ignore <| resolve.InvokeAsFunction(r)
                                 | Error e ->
                                     let jsE = hostEDIToJSException e
                                     ignore <| reject.InvokeAsFunction(jsE)
+
+                                Log.Debug("Finished continuing async JS function {id}", id)
                             with :? ScriptEngineException as e when e.IsFatal ->
                                 runtime.SetMetMemoryLimit()
                                 reraise' e
