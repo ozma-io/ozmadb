@@ -913,6 +913,9 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
                     return this.BaseRunAsyncJSFunction(func, args, cancellationToken)
                 }
 
+            if runtime.MetMemoryLimit then
+                raisef JavaScriptRuntimeException "Memory limit exceeded"
+
             if not retTask.IsCompleted then
                 raisef JavaScriptRuntimeException "The called function haven't resolved to a response"
 
