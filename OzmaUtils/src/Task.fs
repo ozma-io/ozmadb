@@ -77,6 +77,7 @@ type LastTaskRef() =
         <| fun () ->
             task {
                 let currLastTask = lastTask
+                printfn "Waiting for a scheduled task"
                 do! waitFor <| currLastTask.WaitAsync(cancellationToken)
                 cancellationToken.ThrowIfCancellationRequested()
 

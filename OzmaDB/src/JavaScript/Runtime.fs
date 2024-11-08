@@ -964,14 +964,16 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
                 Log.Debug("Set that the promise finished {id}", randId)
                 whenPromiseFinished ()
 
+            let currScheduler = this.CreateScheduler()
+
             let! retTask =
                 task {
-                    let currScheduler = this.CreateScheduler()
                     scheduler.Value <- currScheduler
-                    use _ = Task.toDisposable <| fun () -> currScheduler.WaitAll(cancellationToken)
                     return this.BaseRunAsyncJSFunction(func, args, newWhenPromiseFinished, cancellationToken)
                 }
 
+            Log.Debug("Waiting for all pending tasks in {id}", randId)
+            do! currScheduler.WaitAll(cancellationToken)
             this.Runtime.MemoryLimitCancellationToken.ThrowIfCancellationRequested()
 
             Log.Debug("Is promise finished {id}: {finished}", randId, promiseFinished)
