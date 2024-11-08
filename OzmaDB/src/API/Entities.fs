@@ -712,7 +712,7 @@ type EntitiesAPI(api: IOzmaDBAPI) =
         }
 
     member this.RunCommand(req: CommandRequest) : Task<Result<unit, EntityErrorInfo>> =
-        wrapUnitAPIResult rctx "runCommand" req
+        wrapAPINoResult rctx "runCommand" req
         <| fun () ->
             task {
                 try

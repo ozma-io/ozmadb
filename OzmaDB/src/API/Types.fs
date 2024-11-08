@@ -998,7 +998,7 @@ let logAPIResponse<'Request, 'Response when 'Response :> ILoggableResponse>
                     event.Details <- JsonConvert.SerializeObject response.Details)
 
         rctx.Logger.LogInformation(
-            "Request {name} from {source} is finished with result {}",
+            "Request {name} from {source} is finished with result {response}",
             name,
             rctx.Source,
             responseStr
@@ -1044,15 +1044,15 @@ let logAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggableResponse
         | Error error -> logAPIError rctx name request error
     }
 
-let logUnitAPIResult<'Request, 'Error when 'Error :> IErrorDetails>
+let logAPINoResult<'Request, 'Response, 'Error when 'Error :> IErrorDetails>
     (rctx: IRequestContext)
     (name: string)
     (request: 'Request)
-    (result: Result<unit, 'Error>)
+    (result: Result<'Response, 'Error>)
     : Task =
     task {
         match result with
-        | Ok() -> do! logAPISuccess rctx name request
+        | Ok _ -> do! logAPISuccess rctx name request
         | Error error -> logAPIError rctx name request error
     }
 
@@ -1086,16 +1086,16 @@ let inline wrapAPIResult<'Request, 'Response, 'Error when 'Response :> ILoggable
         return result
     }
 
-let inline wrapUnitAPIResult<'Request, 'Error when 'Error :> IErrorDetails>
+let inline wrapAPINoResult<'Request, 'Response, 'Error when 'Error :> IErrorDetails>
     (rctx: IRequestContext)
     (name: string)
     (request: 'Request)
-    ([<InlineIfLambda>] f: unit -> Task<Result<unit, 'Error>>)
-    : Task<Result<unit, 'Error>> =
+    ([<InlineIfLambda>] f: unit -> Task<Result<'Response, 'Error>>)
+    : Task<Result<'Response, 'Error>> =
     task {
         logAPIRequest rctx name request
         let! result = f ()
-        do! logUnitAPIResult rctx name request result
+        do! logAPINoResult rctx name request result
         return result
     }
 

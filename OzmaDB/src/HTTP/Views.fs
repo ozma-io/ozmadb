@@ -7,7 +7,6 @@ open Microsoft.AspNetCore.Http
 open Giraffe
 open Giraffe.EndpointRouting
 
-open OzmaDB.OzmaUtils
 open OzmaDB.OzmaQL.AST
 open OzmaDB.OzmaQL.Chunk
 open OzmaDB.OzmaQL.Arguments

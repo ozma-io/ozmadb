@@ -106,7 +106,7 @@ type SaveRestoreAPI(api: IOzmaDBAPI) =
             }
 
     member this.RestoreSchemas(req: RestoreSchemasRequest) : Task<Result<unit, RestoreErrorInfo>> =
-        wrapUnitAPIResult rctx "restoreSchemas" req
+        wrapAPINoResult rctx "restoreSchemas" req
         <| fun () ->
             task {
                 let flags = Option.defaultValue emptyRestoreSchemasFlags req.Flags

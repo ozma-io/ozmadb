@@ -121,7 +121,7 @@ type UserViewsAPI(api: IOzmaDBAPI) =
         }
 
     member this.GetUserViewInfo(req: UserViewInfoRequest) : Task<Result<UserViewInfoResponse, UserViewErrorInfo>> =
-        wrapAPIResult rctx "getUserViewInfo" req
+        wrapAPINoResult rctx "getUserViewInfo" req
         <| fun () ->
             task {
                 let flags = Option.defaultValue emptyUserViewFlags req.Flags
@@ -152,7 +152,7 @@ type UserViewsAPI(api: IOzmaDBAPI) =
             }
 
     member this.GetUserViewExplain(req: UserViewExplainRequest) : Task<Result<ExplainedViewExpr, UserViewErrorInfo>> =
-        wrapAPIResult rctx "getUserViewExplain" req
+        wrapAPINoResult rctx "getUserViewExplain" req
         <| fun () ->
             task {
                 if not (canExplain rctx.User.Saved.Type) then
@@ -213,7 +213,7 @@ type UserViewsAPI(api: IOzmaDBAPI) =
             }
 
     member this.GetUserView(req: UserViewRequest) : Task<Result<UserViewEntriesResponse, UserViewErrorInfo>> =
-        wrapAPIResult rctx "getUserView" req
+        wrapAPINoResult rctx "getUserView" req
         <| fun () ->
             task {
                 let flags = Option.defaultValue emptyUserViewFlags req.Flags
