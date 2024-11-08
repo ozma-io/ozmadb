@@ -274,20 +274,20 @@ let private preludeDoc =
     RuntimeLocal(fun runtime -> runtime.Runtime.Compile(info, preludeSource))
 
 [<DefaultScriptUsage(ScriptAccess.None)>]
-type OzmaJSEngine(engine: JSEngine) as this =
-    inherit SchedulerJSEngine<Task.SerializingTrackingTaskScheduler>(engine, Task.SerializingTrackingTaskScheduler)
+type OzmaJSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
+    inherit SchedulerJSEngine<Task.SerializingTrackingTaskScheduler>(runtime, env)
 
     let mutable topLevelAPI = None: IOzmaDBAPI option
     let apiHandle = AsyncLocal<APIHandle>()
 
     do
-        engine.Engine.AddHostObject("unwrappedApiProxy", this)
-        ignore <| engine.Engine.Evaluate(preludeDoc.GetValue(engine.Runtime))
+        this.Engine.AddHostObject("unwrappedApiProxy", this)
+        ignore <| this.Engine.Evaluate(preludeDoc.GetValue(this.Runtime))
 
-    let errorConstructor = engine.Engine.Global.["OzmaDBError"] :?> IJavaScriptObject
+    let errorConstructor = this.Engine.Global.["OzmaDBError"] :?> IJavaScriptObject
 
     member inline private this.ThrowErrorWithInner (e: #IErrorDetails) (innerException: exn) : 'b =
-        let body = engine.Json.Serialize(e)
+        let body = this.Json.Serialize(e)
         let exc = errorConstructor.Invoke(true, body) :?> IJavaScriptObject
         raise <| JSException(e.Message, exc, innerException)
 
@@ -348,7 +348,7 @@ type OzmaJSEngine(engine: JSEngine) as this =
             let! res = f handle
 
             match res with
-            | Ok r -> return engine.Json.Serialize(r)
+            | Ok r -> return this.Json.Serialize(r)
             | Error e -> return this.ThrowError e
         }
 
@@ -484,6 +484,8 @@ type OzmaJSEngine(engine: JSEngine) as this =
             handle.API.Request.WriteEventSync(fun event ->
                 event.Type <- "writeEvent"
                 event.Request <- JsonConvert.SerializeObject req)
+
+    override this.CreateScheduler() = Task.SerializingTrackingTaskScheduler()
 
     member this.SetAPI(api: IOzmaDBAPI) =
         assert (Option.isNone topLevelAPI)

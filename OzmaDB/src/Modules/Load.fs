@@ -28,7 +28,7 @@ let moduleFiles (modules: ResolvedModules) : ModuleFile seq =
     }
 
 let private resolvedPreparedModulesSchema
-    (engine: AbstractJSEngine)
+    (engine: JSEngine)
     (forceAllowBroken: bool)
     (schemaName: SchemaName)
     (resolved: ModulesSchema)
@@ -61,7 +61,7 @@ let private resolvedPreparedModulesSchema
 
 let resolvedLoadedModules
     (resolved: ResolvedModules)
-    (engine: AbstractJSEngine)
+    (engine: JSEngine)
     (forceAllowBroken: bool)
     (cancellationToken: CancellationToken)
     : ResolvedModules =

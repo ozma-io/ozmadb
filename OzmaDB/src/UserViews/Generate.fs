@@ -39,7 +39,7 @@ type GeneratedUserViews =
 let emptyGeneratedUserViews: GeneratedUserViews = { Schemas = Map.empty }
 
 type private UserViewsGeneratorScript
-    (engine: AbstractJSEngine, path: string, scriptSource: string, cancellationToken: CancellationToken) =
+    (engine: JSEngine, path: string, scriptSource: string, cancellationToken: CancellationToken) =
     let func =
         try
             engine.CreateDefaultFunction(
@@ -74,7 +74,7 @@ let private generatorName (schemaName: SchemaName) =
 
 type private UserViewsGenerator
     (
-        engine: AbstractJSEngine,
+        engine: JSEngine,
         layout: Layout,
         triggers: MergedTriggers,
         cancellationToken: CancellationToken,
@@ -113,7 +113,7 @@ type private UserViewsGenerator
     member this.GenerateUserViews views = generateUserViews views
 
 let generateUserViews
-    (engine: AbstractJSEngine)
+    (engine: JSEngine)
     (layout: Layout)
     (triggers: MergedTriggers)
     (forceAllowBroken: bool)

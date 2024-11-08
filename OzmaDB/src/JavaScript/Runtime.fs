@@ -402,45 +402,8 @@ let private getJSExceptionUserData (obj: IJavaScriptObject) : JToken option =
         with :? JsonReaderException as e ->
             raisefWithInner JavaScriptRuntimeException e "Failed to parse user data"
 
-[<AbstractClass>]
-type AbstractJSEngine() =
-    abstract member CreateModule: ModuleFile * CancellationToken -> IJavaScriptObject
-
-    member this.CreateModule(file: ModuleFile) : IJavaScriptObject =
-        this.CreateModule(file, CancellationToken.None)
-
-    abstract member CreateDefaultFunction: ModuleFile * CancellationToken -> IJavaScriptObject
-
-    member this.CreateDefaultFunction(file: ModuleFile) : IJavaScriptObject =
-        this.CreateDefaultFunction(file, CancellationToken.None)
-
-    abstract member Engine: V8ScriptEngine
-    abstract member Runtime: JSRuntime
-    abstract member Json: V8JsonEngine
-
-    abstract member CreateError: string -> IJavaScriptObject
-
-    abstract member WrapHostFunction: (unit -> 'a) -> obj
-
-    abstract member WrapAsyncHostFunction: (unit -> Task<'a>) * ((unit -> Task) -> unit) -> obj
-
-    member this.WrapAsyncHostFunction(f: unit -> Task<'a>) =
-        this.WrapAsyncHostFunction(f, (fun runTask -> ignore (runTask ())))
-
-    abstract member RunJSFunction: IJavaScriptObject * obj[] * CancellationToken -> obj
-
-    member this.RunJSFunction(func: IJavaScriptObject, args: obj[]) : obj =
-        this.RunJSFunction(func, args, CancellationToken.None)
-
-    abstract member RunAsyncJSFunction: IJavaScriptObject * obj[] * CancellationToken -> Task<obj>
-
-    member this.RunAsyncJSFunction(func: IJavaScriptObject, args: obj[]) : Task<obj> =
-        this.RunAsyncJSFunction(func, args, CancellationToken.None)
-
 [<DefaultScriptUsage(ScriptAccess.None)>]
 type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
-    inherit AbstractJSEngine()
-
     let engine =
         runtime.Runtime.CreateScriptEngine(
             V8ScriptEngineFlags.DisableGlobalMembers
@@ -716,8 +679,8 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                         <| promise.InvokeMethod(
                                             "then",
                                             // Not converting these to Actions result in no methods invoked D:
-                                            Action<obj>(fun (result: obj) -> resultSource.SetResult(Ok result)),
-                                            Action<obj>(fun (reason: obj) -> resultSource.SetResult(Error reason))
+                                            Action<obj>(fun result -> resultSource.SetResult(Ok result)),
+                                            Action<obj>(fun reason -> resultSource.SetResult(Error reason))
                                         )
 
                                         return! resultSource.Task.WaitAsync(cancellationToken)
@@ -758,7 +721,9 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
     // Instead, they cache Module instances by the source code digests, and there's
     // no way to call `Instantiate()`.
     // We evaluate them immediately instead.
-    override this.CreateModule(file: ModuleFile, cancellationToken: CancellationToken) : IJavaScriptObject =
+    abstract member CreateModule: ModuleFile * CancellationToken -> IJavaScriptObject
+
+    default this.CreateModule(file: ModuleFile, cancellationToken: CancellationToken) : IJavaScriptObject =
         let info = DocumentInfo(file.Path, Category = ModuleCategory.Standard)
         let doc = StringDocument(info, file.Source)
 
@@ -802,20 +767,25 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
         ret :?> IJavaScriptObject
 
-    override this.CreateDefaultFunction(file: ModuleFile, cancellationToken: CancellationToken) : IJavaScriptObject =
+    abstract member CreateDefaultFunction: ModuleFile * CancellationToken -> IJavaScriptObject
+
+    default this.CreateDefaultFunction(file: ModuleFile, cancellationToken: CancellationToken) : IJavaScriptObject =
         let jsModule = this.CreateModule(file, cancellationToken)
 
         match jsModule.GetProperty("default") with
         | :? IJavaScriptObject as obj when obj.Kind = JavaScriptObjectKind.Function -> obj
         | _ -> raisef JavaScriptRuntimeException "Invalid default function"
 
-    override this.Engine = engine
-    override this.Runtime = runtime
-    override this.Json = jsonEngine
+    member this.Engine = engine
+    member this.Runtime = runtime
+    member this.Json = jsonEngine
 
-    override this.CreateError message = createError message
+    abstract member CreateError: string -> IJavaScriptObject
+    default this.CreateError message = createError message
 
-    override this.WrapHostFunction(f: unit -> 'a) =
+    abstract member WrapHostFunction: (unit -> 'a) -> obj
+
+    default this.WrapHostFunction(f: unit -> 'a) =
         try
             f () :> obj
         with
@@ -824,20 +794,24 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
             let error = hostEDIToJSException <| ExceptionDispatchInfo.Capture(e)
             wrappedHostExceptionConstructor.Invoke(true, error)
 
-    override this.WrapAsyncHostFunction(f: unit -> Task<'a>, wrapTask: (unit -> Task) -> unit) =
+    abstract member StartAsyncHostTask: (unit -> Task) -> unit
+    default this.StartAsyncHostTask(f: unit -> Task) = f () |> ignore
+
+    abstract member WrapAsyncHostFunction: (unit -> Task<'a>) -> obj
+
+    override this.WrapAsyncHostFunction(f: unit -> Task<'a>) =
         let stack = getStackTrace ()
 
         promiseConstructor.Invoke(
             true,
             Action<_, _>(fun (resolve: IJavaScriptObject) (reject: IJavaScriptObject) ->
-                wrapTask
+                this.StartAsyncHostTask
                 <| fun () ->
                     task {
-                        asyncStackTrace.Value <- stack
-
                         let! result =
                             task {
                                 try
+                                    asyncStackTrace.Value <- stack
                                     let! ret = f ()
                                     return Ok ret
                                 with
@@ -857,19 +831,29 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                     })
         )
 
-    override this.RunJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) : obj =
+    abstract member RunJSFunction: IJavaScriptObject * obj[] * CancellationToken -> obj
+
+    default this.RunJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) : obj =
         if func.Engine <> engine then
             failwith "Function belongs to another engine"
 
         this.EvaluateJS cancellationToken <| fun () -> func.InvokeAsFunction(args)
 
-    override this.RunAsyncJSFunction
+    member this.RunJSFunction(func: IJavaScriptObject, args: obj[]) : obj =
+        this.RunJSFunction(func, args, CancellationToken.None)
+
+    abstract member RunAsyncJSFunction: IJavaScriptObject * obj[] * CancellationToken -> Task<obj>
+
+    default this.RunAsyncJSFunction
         (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
         : Task<obj> =
         if func.Engine <> engine then
             failwith "Function belongs to another engine"
 
         this.EvaluateAsyncJS cancellationToken <| fun () -> func.InvokeAsFunction(args)
+
+    member this.RunAsyncJSFunction(func: IJavaScriptObject, args: obj[]) : Task<obj> =
+        this.RunAsyncJSFunction(func, args, CancellationToken.None)
 
 // ClearScript doesn't allow you to set the `ScriptException` externally,
 // so we need our own type of an exception for that.
@@ -888,9 +872,9 @@ and JSException(message: string, value: IJavaScriptObject, innerException: exn) 
 
     member this.Value = value
 
-type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>
-    (engine: AbstractJSEngine, constructScheduler: unit -> 's) =
-    inherit AbstractJSEngine()
+[<AbstractClass>]
+type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRuntime, env: JSEnvironment) =
+    inherit JSEngine(runtime, env)
 
     let scheduler = AsyncLocal<'s>()
 
@@ -898,37 +882,24 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>
         let currScheduler = scheduler.Value
         if isRefNull currScheduler then None else Some currScheduler
 
-    member this.WrappedEngine = engine
+    override this.StartAsyncHostTask(runTask: unit -> Task) : unit =
+        let wrappedRunTask () =
+            let currScheduler = scheduler.Value
 
-    override this.Engine = engine.Engine
-    override this.Runtime = engine.Runtime
-    override this.Json = engine.Json
+            if isRefNull currScheduler then
+                runTask ()
+            else
+                currScheduler.Post(runTask)
 
-    override this.CreateModule(file: ModuleFile, cancellationToken: CancellationToken) : IJavaScriptObject =
-        engine.CreateModule(file, cancellationToken)
+        base.StartAsyncHostTask(wrappedRunTask)
 
-    override this.CreateDefaultFunction(file: ModuleFile, cancellationToken: CancellationToken) : IJavaScriptObject =
-        engine.CreateDefaultFunction(file, cancellationToken)
+    abstract CreateScheduler: unit -> 's
 
-    override this.CreateError(message: string) : IJavaScriptObject = engine.CreateError(message)
-
-    override this.WrapHostFunction(f: unit -> 'a) : obj = engine.WrapHostFunction(f)
-
-    override this.WrapAsyncHostFunction(f: unit -> Task<'a>, wrapTask: (unit -> Task) -> unit) : obj =
-        engine.WrapAsyncHostFunction(
-            f,
-            fun runTask ->
-                wrapTask (fun () ->
-                    let currScheduler = scheduler.Value
-
-                    if isRefNull currScheduler then
-                        runTask ()
-                    else
-                        currScheduler.Post(runTask))
-        )
-
-    override this.RunJSFunction(func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken) : obj =
-        engine.RunJSFunction(func, args, cancellationToken)
+    // F# is dumb here.
+    member private this.BaseRunAsyncJSFunction
+        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
+        =
+        base.RunAsyncJSFunction(func, args, cancellationToken)
 
     override this.RunAsyncJSFunction
         (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
@@ -936,10 +907,10 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>
         task {
             let! retTask =
                 task {
-                    let currScheduler = constructScheduler ()
+                    let currScheduler = this.CreateScheduler()
                     scheduler.Value <- currScheduler
                     use _ = Task.toDisposable <| fun () -> currScheduler.WaitAll(cancellationToken)
-                    return engine.RunAsyncJSFunction(func, args, cancellationToken)
+                    return this.BaseRunAsyncJSFunction(func, args, cancellationToken)
                 }
 
             if not retTask.IsCompleted then

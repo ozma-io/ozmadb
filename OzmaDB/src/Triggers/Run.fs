@@ -40,7 +40,7 @@ type ArgsTriggerResult =
     | ATUntouched
     | ATCancelled
 
-type TriggerScript(engine: AbstractJSEngine, name: string, scriptSource: string, cancellationToken: CancellationToken) =
+type TriggerScript(engine: JSEngine, name: string, scriptSource: string, cancellationToken: CancellationToken) =
     let func =
         try
             engine.CreateDefaultFunction(moduleFile name scriptSource, cancellationToken)
@@ -191,8 +191,7 @@ type PreparedTriggers =
 let private triggerName (triggerRef: TriggerRef) =
     sprintf "triggers/%O/%O/%O/%O.mjs" triggerRef.Schema triggerRef.Entity.Schema triggerRef.Entity.Name triggerRef.Name
 
-type private PreparedTriggersBuilder
-    (engine: AbstractJSEngine, forceAllowBroken: bool, cancellationToken: CancellationToken) =
+type private PreparedTriggersBuilder(engine: JSEngine, forceAllowBroken: bool, cancellationToken: CancellationToken) =
     let prepareTriggersEntity
         (schemaName: SchemaName)
         (triggerEntity: ResolvedEntityRef)
@@ -237,7 +236,7 @@ type private PreparedTriggersBuilder
     member this.PrepareTriggers triggers = prepareTriggers triggers
 
 let prepareTriggers
-    (engine: AbstractJSEngine)
+    (engine: JSEngine)
     (forceAllowBroken: bool)
     (triggers: ResolvedTriggers)
     (cancellationToken: CancellationToken)

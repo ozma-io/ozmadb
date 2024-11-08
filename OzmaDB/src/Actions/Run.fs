@@ -24,7 +24,7 @@ type ActionRunException(message: string, innerException: exn, isUserException: b
 
     new(message: string) = ActionRunException(message, null, true)
 
-type ActionScript(engine: AbstractJSEngine, name: string, scriptSource: string, cancellationToken: CancellationToken) =
+type ActionScript(engine: JSEngine, name: string, scriptSource: string, cancellationToken: CancellationToken) =
     let func =
         try
             engine.CreateDefaultFunction(moduleFile name scriptSource, cancellationToken)
@@ -71,8 +71,7 @@ type PreparedActions =
 let private actionName (actionRef: ActionRef) =
     sprintf "actions/%O/%O.mjs" actionRef.Schema actionRef.Name
 
-type private PreparedActionsBuilder
-    (engine: AbstractJSEngine, forceAllowBroken: bool, cancellationToken: CancellationToken) =
+type private PreparedActionsBuilder(engine: JSEngine, forceAllowBroken: bool, cancellationToken: CancellationToken) =
     let prepareActionsSchema (schemaName: SchemaName) (actions: ActionsSchema) : PreparedActionsSchema =
         let prepareOne name (action: ResolvedAction) =
             try
@@ -98,7 +97,7 @@ type private PreparedActionsBuilder
     member this.PrepareActions actions = prepareActions actions
 
 let prepareActions
-    (engine: AbstractJSEngine)
+    (engine: JSEngine)
     (forceAllowBroken: bool)
     (actions: ResolvedActions)
     (cancellationToken: CancellationToken)

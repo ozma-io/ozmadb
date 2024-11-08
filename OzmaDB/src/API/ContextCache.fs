@@ -301,8 +301,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                 { Files = files
                   SearchPath = seq { moduleDirectory } }
 
-            let engine = JSEngine(runtime, env)
-            OzmaJSEngine(engine))
+            OzmaJSEngine(runtime, env))
 
     let rec finishColdRebuild
         (transaction: DatabaseTransaction)
