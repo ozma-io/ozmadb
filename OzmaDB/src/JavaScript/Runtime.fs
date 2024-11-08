@@ -668,14 +668,14 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                     use handle = cancellationToken.UnsafeRegister((fun _ -> engine.Interrupt()), null)
 
                     let randId = Random.Shared.Next()
-                    eprintfn "Evaluating async JS %d" randId
+                    printfn "Evaluating async JS %d" randId
 
                     try
                         let! maybeResult =
                             task {
                                 try
                                     let result = f ()
-                                    eprintfn "Got first async result %d" randId
+                                    printfn "Got first async result %d" randId
 
                                     match result with
                                     | :? IJavaScriptObject as promise when promise.Kind = JavaScriptObjectKind.Promise ->
@@ -690,14 +690,14 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                                 null
                                             )
 
-                                        eprintfn "Invoking then for %d" randId
+                                        printfn "Invoking then for %d" randId
 
                                         ignore
                                         <| promise.InvokeMethod(
                                             "then",
                                             // Not converting these to Actions result in no methods invoked D:
                                             Action<obj>(fun result ->
-                                                eprintfn "Resolved %d" randId
+                                                printfn "Resolved %d" randId
                                                 resultSource.SetResult(Ok result)
                                                 // We want to have a callback synchronous to the async host JS functions calling `resolve`.
                                                 // This is needed for the `SchedulerJSEngine` to be able to detect that the resulting promise
@@ -706,7 +706,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                                 // synchronously after the host functions.
                                                 whenPromiseFinished ()),
                                             Action<obj>(fun reason ->
-                                                eprintfn "Rejected %d" randId
+                                                printfn "Rejected %d" randId
                                                 resultSource.SetResult(Error reason)
                                                 whenPromiseFinished ())
                                         )
@@ -718,7 +718,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                     return reraise' e
                             }
 
-                        eprintfn "Returning async JS %d" randId
+                        printfn "Returning async JS %d" randId
 
                         match maybeResult with
                         | (Ok result) -> return result
