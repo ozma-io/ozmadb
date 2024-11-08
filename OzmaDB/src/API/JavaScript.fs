@@ -495,13 +495,14 @@ type OzmaJSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
     // Ugh. Workarounds.
     member private this.BaseRunAsyncJSFunction
-        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
-        =
-        base.RunAsyncJSFunction(func, args, cancellationToken)
+        (func: IJavaScriptObject, args: obj[], whenPromiseFinished: (unit -> unit), cancellationToken: CancellationToken) =
+        base.RunAsyncJSFunction(func, args, whenPromiseFinished, cancellationToken)
 
     override this.RunAsyncJSFunction
-        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
-        : Task<obj> =
+        (func: IJavaScriptObject, args: obj[], whenPromiseFinished: (unit -> unit), cancellationToken: CancellationToken) : Task<
+                                                                                                                                obj
+                                                                                                                             >
+        =
         task {
             if isRefNull apiHandle.Value then
                 let ozma =
@@ -511,5 +512,5 @@ type OzmaJSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
                 apiHandle.Value <- APIHandle(ozma)
 
-            return! this.BaseRunAsyncJSFunction(func, args, cancellationToken)
+            return! this.BaseRunAsyncJSFunction(func, args, whenPromiseFinished, cancellationToken)
         }
