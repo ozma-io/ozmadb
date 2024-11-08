@@ -43,16 +43,23 @@ type DatabaseConnection(loggerFactory: ILoggerFactory, connectionString: string)
 
     member this.CloseAsync() = connection.CloseAsync()
 
+[<TailCall>]
+let rec private getPostgresException (e: exn) =
+    match e with
+    | :? PostgresException as perr -> Some perr
+    | e when not <| isNull e.InnerException -> getPostgresException e.InnerException
+    | _ -> None
+
+let inline private (|IsPostgresException|_|) (e: exn) = getPostgresException e
+
 let inline private tryEFUpdateQuery (f: unit -> Task<'a>) : Task<'a> =
     task {
         try
             return! f ()
-        with :? DbUpdateException as err ->
-            match err.InnerException with
-            // 40001: could not serialize access due to concurrent update
-            | :? PostgresException as perr when perr.SqlState = "40001" ->
-                return raisefWithInner ConcurrentUpdateException err "Concurrent update detected"
-            | _ -> return reraise' err
+        with
+        | IsPostgresException perr as e when perr.SqlState = "40001" ->
+            return raisefWithInner ConcurrentUpdateException e "Concurrent update detected"
+        | e -> return reraise' e
     }
 
 let serializedSaveChangesAsync (db: DbContext) (cancellationToken: CancellationToken) =
