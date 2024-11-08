@@ -821,26 +821,29 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                 this.StartAsyncHostTask
                 <| fun () ->
                     task {
-                        let! result =
-                            task {
-                                try
-                                    asyncStackTrace.Value <- stack
-                                    let! ret = f ()
-                                    return Ok ret
-                                with
-                                | IsInterrupt e -> return this.RethrowInterrupt e
-                                | e -> return Error(ExceptionDispatchInfo.Capture(e))
-                            }
-                        // We don't expect any JavaScript exceptions but the fatal ones here.
                         try
-                            match result with
-                            | Ok r -> ignore <| resolve.InvokeAsFunction(r)
-                            | Error e ->
-                                let jsE = hostEDIToJSException e
-                                ignore <| reject.InvokeAsFunction(jsE)
-                        with :? ScriptEngineException as e when e.IsFatal ->
-                            runtime.SetMetMemoryLimit()
-                            reraise' e
+                            let! result =
+                                task {
+                                    try
+                                        asyncStackTrace.Value <- stack
+                                        let! ret = f ()
+                                        return Ok ret
+                                    with
+                                    | IsInterrupt e -> return this.RethrowInterrupt e
+                                    | e -> return Error(ExceptionDispatchInfo.Capture(e))
+                                }
+                            // We don't expect any JavaScript exceptions but the fatal ones here.
+                            try
+                                match result with
+                                | Ok r -> ignore <| resolve.InvokeAsFunction(r)
+                                | Error e ->
+                                    let jsE = hostEDIToJSException e
+                                    ignore <| reject.InvokeAsFunction(jsE)
+                            with :? ScriptEngineException as e when e.IsFatal ->
+                                runtime.SetMetMemoryLimit()
+                                reraise' e
+                        with e ->
+                            Serilog.Log.Error(e, "Unexpected exception in async host function")
                     })
         )
 
