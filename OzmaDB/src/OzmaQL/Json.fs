@@ -4,6 +4,7 @@ open System
 open Newtonsoft.Json
 open Newtonsoft.Json.Serialization
 open NodaTime
+open NodaTime.Text
 open NodaTime.Serialization.JsonNet
 
 open OzmaDB.OzmaUtils
@@ -16,18 +17,26 @@ module SQL = OzmaDB.SQL.AST
 type InstantDateTimeConverter() =
     inherit JsonConverter<Instant>()
 
+    let noTimeZonePattern =
+        InstantPattern.CreateWithInvariantCulture("uuuu'-'MM'-'dd'T'HH':'mm':'ss;FFFFFFFFF")
+
     override this.ReadJson
         (reader: JsonReader, objectType: Type, existingValue, hasExistingValue, serializer: JsonSerializer)
         : Instant =
         let ret =
             match reader.Value with
             | :? string as str ->
-                let res = NodaTime.Text.InstantPattern.ExtendedIso.Parse str
+                let offsetRes = OffsetDateTimePattern.ExtendedIso.Parse str
 
-                if res.Success then
-                    res.Value
+                if offsetRes.Success then
+                    offsetRes.Value.ToInstant()
                 else
-                    raisefWithInner JsonSerializationException res.Exception ""
+                    let res = noTimeZonePattern.Parse str
+
+                    if res.Success then
+                        res.Value
+                    else
+                        raisefWithInner JsonSerializationException res.Exception ""
             | :? DateTime as dt ->
                 try
                     Instant.FromDateTimeUtc dt
