@@ -656,6 +656,8 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                 interruptEDI.Value <- Unchecked.defaultof<_>
         | _ -> run ()
 
+    member val JSRequestID = AsyncLocal<int>()
+
     member inline private this.EvaluateAsyncJS
         (cancellationToken: CancellationToken)
         ([<InlineIfLambda>] f: unit -> obj)
@@ -667,7 +669,10 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                     cancellationToken.ThrowIfCancellationRequested()
                     use handle = cancellationToken.UnsafeRegister((fun _ -> engine.Interrupt()), null)
 
-                    let randId = Random.Shared.Next()
+                    if this.JSRequestID.Value = 0 then
+                        this.JSRequestID.Value <- Random.Shared.Next()
+
+                    let randId = this.JSRequestID.Value
                     printfn "Evaluating async JS %d" randId
 
                     try
@@ -951,8 +956,14 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
         task {
             let mutable promiseFinished = false
 
+            if this.JSRequestID.Value = 0 then
+                this.JSRequestID.Value <- Random.Shared.Next()
+
+            let randId = this.JSRequestID.Value
+
             let newWhenPromiseFinished () =
                 promiseFinished <- true
+                printfn "Set that the promise finished: %i" randId
                 whenPromiseFinished ()
 
             let! retTask =
@@ -964,6 +975,8 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
                 }
 
             this.Runtime.MemoryLimitCancellationToken.ThrowIfCancellationRequested()
+
+            printfn "Is promise finished %i: %b" randId promiseFinished
 
             if not promiseFinished then
                 raisef JavaScriptRuntimeException "The called function haven't resolved to a response"
