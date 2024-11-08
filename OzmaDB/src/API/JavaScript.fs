@@ -415,7 +415,7 @@ type OzmaJSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
         this.SimpleApiCall arg (fun handle -> handle.API.Entities.UpdateEntry)
 
     [<ScriptUsage(ScriptAccess.Full)>]
-    member this.GeleteEntry arg =
+    member this.DeleteEntry arg =
         this.SimpleApiCall arg (fun handle -> handle.API.Entities.DeleteEntry)
 
     [<ScriptUsage(ScriptAccess.Full)>]
