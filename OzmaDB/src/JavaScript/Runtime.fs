@@ -670,14 +670,14 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                     use handle = cancellationToken.UnsafeRegister((fun _ -> engine.Interrupt()), null)
 
                     let randId = this.JSRequestID.Value
-                    printfn "Evaluating async JS %d" randId
+                    Log.Debug("Evaluating async JS {id}", randId)
 
                     try
                         let! maybeResult =
                             task {
                                 try
                                     let result = f ()
-                                    printfn "Got first async result %d" randId
+                                    Log.Debug("Got first async result {id}", randId)
 
                                     match result with
                                     | :? IJavaScriptObject as promise when promise.Kind = JavaScriptObjectKind.Promise ->
@@ -692,14 +692,14 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                                 null
                                             )
 
-                                        printfn "Invoking then for %d" randId
+                                        Log.Debug("Invoking then for {id}", randId)
 
                                         ignore
                                         <| promise.InvokeMethod(
                                             "then",
                                             // Not converting these to Actions result in no methods invoked D:
                                             Action<obj>(fun result ->
-                                                printfn "Resolved %d" randId
+                                                Log.Debug("Resolved async JS {id}", randId)
                                                 resultSource.SetResult(Ok result)
                                                 // We want to have a callback synchronous to the async host JS functions calling `resolve`.
                                                 // This is needed for the `SchedulerJSEngine` to be able to detect that the resulting promise
@@ -708,7 +708,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                                 // synchronously after the host functions.
                                                 whenPromiseFinished ()),
                                             Action<obj>(fun reason ->
-                                                printfn "Rejected %d" randId
+                                                Log.Debug("Rejected async JS {id}", randId)
                                                 resultSource.SetResult(Error reason)
                                                 whenPromiseFinished ())
                                         )
@@ -720,7 +720,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                     return reraise' e
                             }
 
-                        printfn "Returning async JS %d" randId
+                        Log.Debug("Returning async JS {id}", randId)
 
                         match maybeResult with
                         | (Ok result) -> return result
@@ -931,6 +931,8 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
         let wrappedRunTask () =
             let currScheduler = scheduler.Value
 
+            Log.Debug("Starting async host task {id}", this.JSRequestID.Value)
+
             if isRefNull currScheduler then
                 runTask ()
             else
@@ -953,13 +955,13 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
         task {
             let mutable promiseFinished = false
 
-            this.JSRequestID.Value <- Random.Shared.Next()
-
-            let randId = this.JSRequestID.Value
+            let randId = Random.Shared.Next()
+            Log.Debug("Starting async JS function {id}, previous id: {prevId}", randId, this.JSRequestID.Value)
+            this.JSRequestID.Value <- randId
 
             let newWhenPromiseFinished () =
                 promiseFinished <- true
-                printfn "Set that the promise finished: %i" randId
+                Log.Debug("Set that the promise finished {id}", randId)
                 whenPromiseFinished ()
 
             let! retTask =
@@ -972,7 +974,7 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
 
             this.Runtime.MemoryLimitCancellationToken.ThrowIfCancellationRequested()
 
-            printfn "Is promise finished %i: %b" randId promiseFinished
+            Log.Debug("Is promise finished {id}: {finished}", randId, promiseFinished)
 
             if not promiseFinished then
                 raisef JavaScriptRuntimeException "The called function haven't resolved to a response"
