@@ -914,7 +914,7 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
                 }
 
             if not retTask.IsCompleted then
-                raisef JavaScriptRuntimeException "The called function doesn't resolve to a response"
+                raisef JavaScriptRuntimeException "The called function haven't resolved to a response"
 
             return! retTask
         }
