@@ -274,6 +274,7 @@ let private setupLoggerConfiguration (configuration: LoggerConfiguration) =
         .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
         // We really, really don't use DataProtection.
         .MinimumLevel.Override("Microsoft.AspNetCore.DataProtection", LogEventLevel.Error)
+        .Enrich.WithThreadId()
         .Enrich.FromLogContext()
 
 let private setupLogging (webAppBuilder: WebApplicationBuilder) =
@@ -295,7 +296,10 @@ let private setupLogging (webAppBuilder: WebApplicationBuilder) =
             .ReadFrom.Services(services)
 
         if not <| config.GetSection("Serilog").GetSection("WriteTo").Exists() then
-            ignore <| configuration.WriteTo.Console()
+            ignore
+            <| configuration.WriteTo.Console(
+                outputTemplate = "[{Timestamp:HH:mm:ss} {Level:u3}] <{ThreadId}> {Message:lj}{NewLine}{Exception}"
+            )
 
     ignore <| webAppBuilder.Host.UseSerilog(configureSerilog)
 
