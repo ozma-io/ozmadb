@@ -174,7 +174,8 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                 member this.Create() = JSRuntime jsRuntimeParams
 
                 member this.Return runtime =
-                    not runtime.MetMemoryLimit && runtime.Limits = jsRuntimeParams }
+                    not runtime.MemoryLimitCancellationToken.IsCancellationRequested
+                    && runtime.Limits = jsRuntimeParams }
 
         DefaultObjectPool(policy, Environment.ProcessorCount)
 

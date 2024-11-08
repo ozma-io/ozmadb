@@ -199,15 +199,16 @@ type JSRuntime(limits: JSRuntimeLimits) =
 
     do runtime.EnableInterruptPropagation <- true
 
-    let mutable metMemoryLimit = false
+    let memoryLimitCancellationTokenSource = new CancellationTokenSource()
 
     member this.Runtime = runtime
 
     member this.Limits = limits
 
-    member this.SetMetMemoryLimit() = metMemoryLimit <- true
+    member this.SetMetMemoryLimit() =
+        memoryLimitCancellationTokenSource.Cancel()
 
-    member this.MetMemoryLimit = metMemoryLimit
+    member this.MemoryLimitCancellationToken = memoryLimitCancellationTokenSource.Token
 
 type RuntimeLocal<'a when 'a: not struct>(create: JSRuntime -> 'a) =
     let table = ConditionalWeakTable<JSRuntime, 'a>()
@@ -675,6 +676,15 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                     | :? IJavaScriptObject as promise when promise.Kind = JavaScriptObjectKind.Promise ->
                                         let resultSource = TaskCompletionSource<Result<obj, obj>>()
 
+                                        use handle =
+                                            runtime.MemoryLimitCancellationToken.UnsafeRegister(
+                                                (fun _ ->
+                                                    resultSource.SetResult(
+                                                        Error(JavaScriptRuntimeException("Memory limit exceeded"))
+                                                    )),
+                                                null
+                                            )
+
                                         ignore
                                         <| promise.InvokeMethod(
                                             "then",
@@ -692,6 +702,9 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
                         match maybeResult with
                         | (Ok result) -> return result
+                        | (Error(:? exn as e)) ->
+                            // Happens only when the memory limit is met.
+                            return raise e
                         | (Error reason) ->
                             tryRethrowPreviousHostExceptionFromJS reason
                             ignore <| throwException.InvokeAsFunction(reason)
@@ -913,8 +926,7 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
                     return this.BaseRunAsyncJSFunction(func, args, cancellationToken)
                 }
 
-            if runtime.MetMemoryLimit then
-                raisef JavaScriptRuntimeException "Memory limit exceeded"
+            this.Runtime.MemoryLimitCancellationToken.ThrowIfCancellationRequested()
 
             if not retTask.IsCompleted then
                 raisef JavaScriptRuntimeException "The called function haven't resolved to a response"
