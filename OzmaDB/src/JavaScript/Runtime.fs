@@ -669,9 +669,6 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                     cancellationToken.ThrowIfCancellationRequested()
                     use handle = cancellationToken.UnsafeRegister((fun _ -> engine.Interrupt()), null)
 
-                    if this.JSRequestID.Value = 0 then
-                        this.JSRequestID.Value <- Random.Shared.Next()
-
                     let randId = this.JSRequestID.Value
                     printfn "Evaluating async JS %d" randId
 
@@ -956,8 +953,7 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
         task {
             let mutable promiseFinished = false
 
-            if this.JSRequestID.Value = 0 then
-                this.JSRequestID.Value <- Random.Shared.Next()
+            this.JSRequestID.Value <- Random.Shared.Next()
 
             let randId = this.JSRequestID.Value
 
