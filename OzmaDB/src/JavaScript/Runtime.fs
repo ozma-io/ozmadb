@@ -963,6 +963,15 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
                                                                                                                              >
         =
         task {
+            // If we are already inside a JS evaluation (have V8 in the current thread's call stack),
+            // the microtasks queue will only be processed after the current evaluation finishes.
+            // This will prevent `retTask` from getting resolved until then, so we can't reliably
+            // detect that a no-resolve happened. To mitigate that, yield, clearing the call stack.
+            // This must be done before the current JS evaluation starts, so any of the to-be-scheduled
+            // microtasks will be executed right before the async host JS task is finished.
+            // Check `WrapAsyncHostFunction` for more details.
+            do! Task.Yield()
+
             let mutable promiseFinished = false
 
             let randId = Random.Shared.Next()
@@ -979,12 +988,6 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
 
             let retTask =
                 this.BaseRunAsyncJSFunction(func, args, newWhenPromiseFinished, cancellationToken)
-
-            // If we are already inside a JS evaluation (have V8 in the current thread's call stack),
-            // the microtasks queue will only be processed after the current evaluation finishes.
-            // This will prevent `retTask` from getting resolved until then, so we can't reliably
-            // detect that a no-resolve happened. To mitigate that, yield, clearing the call stack.
-            do! Task.Yield()
 
             Log.Debug("Waiting for all pending tasks in {id}", randId)
             do! currScheduler.WaitAll(cancellationToken)
