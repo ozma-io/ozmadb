@@ -859,6 +859,10 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                             try
                                 Log.Debug("Continuing async JS function {id}", id)
 
+                                // This schedules a microtask to continue the evaluation.
+                                // If we the current thread isn't inside V8 already (if we suspended),
+                                // the microtask will be processed immediately. Otherwise,
+                                // it won't happen until the current evaluation finishes.
                                 match result with
                                 | Ok r -> ignore <| resolve.InvokeAsFunction(r)
                                 | Error e ->
@@ -975,6 +979,12 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
 
             let retTask =
                 this.BaseRunAsyncJSFunction(func, args, newWhenPromiseFinished, cancellationToken)
+
+            // If we are already inside a JS evaluation (have V8 in the current thread's call stack),
+            // the microtasks queue will only be processed after the current evaluation finishes.
+            // This will prevent `retTask` from getting resolved until then, so we can't reliably
+            // detect that a no-resolve happened. To mitigate that, yield, clearing the call stack.
+            do! Task.Yield()
 
             Log.Debug("Waiting for all pending tasks in {id}", randId)
             do! currScheduler.WaitAll(cancellationToken)
