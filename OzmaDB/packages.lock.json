@@ -119,23 +119,23 @@
       "Npgsql.EntityFrameworkCore.PostgreSQL": {
         "type": "Direct",
         "requested": "[8.0.*, )",
-        "resolved": "8.0.8",
-        "contentHash": "D5WWJZJTgZYUmGv66BARXbTlinp2a5f5RueJqGYoHuWJw02J0i2va/RA+8N4A5hLORK5YKMRqXhFWtKsZdrksw==",
+        "resolved": "8.0.10",
+        "contentHash": "gFPl9Dmxih7Yi4tZ3bITzZFzbxFMBx04gqTqcjoL2r5VEW+O2TA5UVw/wm/XW26NAJ7sg59Je0+9QrwiZt6MPQ==",
         "dependencies": {
-          "Microsoft.EntityFrameworkCore": "8.0.8",
-          "Microsoft.EntityFrameworkCore.Abstractions": "8.0.8",
-          "Microsoft.EntityFrameworkCore.Relational": "8.0.8",
-          "Npgsql": "8.0.4"
+          "Microsoft.EntityFrameworkCore": "8.0.10",
+          "Microsoft.EntityFrameworkCore.Abstractions": "8.0.10",
+          "Microsoft.EntityFrameworkCore.Relational": "8.0.10",
+          "Npgsql": "8.0.5"
         }
       },
       "Npgsql.EntityFrameworkCore.PostgreSQL.NodaTime": {
         "type": "Direct",
         "requested": "[8.0.*, )",
-        "resolved": "8.0.8",
-        "contentHash": "lq+0sHuHySoYb6AxluUN+4TMrLTNOL4f5kKtf8eWoN0IoTC8cTL6IXOhfTOI8klUOdnOTMx3f7mdDKdR5AV1Jw==",
+        "resolved": "8.0.10",
+        "contentHash": "hxa3uWxyZ8WOAiMXgpsp7LteRgthdZ6jlx0RJY/EWINWQVtzkFQ1qs+J4NBaMLd0HQdABuzyYP/lQ3GNtJ004Q==",
         "dependencies": {
-          "Npgsql.EntityFrameworkCore.PostgreSQL": "8.0.8",
-          "Npgsql.NodaTime": "8.0.4"
+          "Npgsql.EntityFrameworkCore.PostgreSQL": "8.0.10",
+          "Npgsql.NodaTime": "8.0.5"
         }
       },
       "Npgsql.Json.NET": {
@@ -187,6 +187,15 @@
           "Serilog.Sinks.Console": "5.0.0",
           "Serilog.Sinks.Debug": "2.0.0",
           "Serilog.Sinks.File": "5.0.0"
+        }
+      },
+      "Serilog.Enrichers.Thread": {
+        "type": "Direct",
+        "requested": "[3.1.*, )",
+        "resolved": "3.1.0",
+        "contentHash": "85lWsGRJpRxvKT6j/H67no55SUBsBIvp556TKuBTGhjtoPeq+L7j/sDWbgAtvT0p7u7/phJyX6j35PQ4Vtqw0g==",
+        "dependencies": {
+          "Serilog": "2.3.0"
         }
       },
       "System.Data.HashFunction.CityHash": {

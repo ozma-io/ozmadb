@@ -656,9 +656,12 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                 interruptEDI.Value <- Unchecked.defaultof<_>
         | _ -> run ()
 
+    member val JSRequestID = AsyncLocal<int>()
+
     member inline private this.EvaluateAsyncJS
         (cancellationToken: CancellationToken)
         ([<InlineIfLambda>] f: unit -> obj)
+        ([<InlineIfLambda>] whenPromiseFinished: unit -> unit)
         : Task<obj> =
         task {
             let inline run () : Task<obj> =
@@ -666,11 +669,15 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                     cancellationToken.ThrowIfCancellationRequested()
                     use handle = cancellationToken.UnsafeRegister((fun _ -> engine.Interrupt()), null)
 
+                    let randId = this.JSRequestID.Value
+                    Log.Debug("Evaluating async JS {id}", randId)
+
                     try
                         let! maybeResult =
                             task {
                                 try
                                     let result = f ()
+                                    Log.Debug("Got first async result {id}", randId)
 
                                     match result with
                                     | :? IJavaScriptObject as promise when promise.Kind = JavaScriptObjectKind.Promise ->
@@ -685,12 +692,25 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                                 null
                                             )
 
+                                        Log.Debug("Invoking then for {id}", randId)
+
                                         ignore
                                         <| promise.InvokeMethod(
                                             "then",
                                             // Not converting these to Actions result in no methods invoked D:
-                                            Action<obj>(fun result -> resultSource.SetResult(Ok result)),
-                                            Action<obj>(fun reason -> resultSource.SetResult(Error reason))
+                                            Action<obj>(fun result ->
+                                                Log.Debug("Resolved async JS {id}", randId)
+                                                resultSource.SetResult(Ok result)
+                                                // We want to have a callback synchronous to the async host JS functions calling `resolve`.
+                                                // This is needed for the `SchedulerJSEngine` to be able to detect that the resulting promise
+                                                // has been fulfilled. We cannot just check if `EvaluateAsyncJS`'s task is finished, because
+                                                // there is post-processing and cancellation tokens involved, so it may not be finished
+                                                // synchronously after the host functions.
+                                                whenPromiseFinished ()),
+                                            Action<obj>(fun reason ->
+                                                Log.Debug("Rejected async JS {id}", randId)
+                                                resultSource.SetResult(Error reason)
+                                                whenPromiseFinished ())
                                         )
 
                                         return! resultSource.Task.WaitAsync(cancellationToken)
@@ -699,6 +719,8 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                     tryRethrowPreviousHostException e
                                     return reraise' e
                             }
+
+                        Log.Debug("Returning async JS {id}", randId)
 
                         match maybeResult with
                         | (Ok result) -> return result
@@ -814,6 +836,7 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
 
     override this.WrapAsyncHostFunction(f: unit -> Task<'a>) =
         let stack = getStackTrace ()
+        let id = this.JSRequestID.Value
 
         promiseConstructor.Invoke(
             true,
@@ -834,11 +857,19 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
                                 }
                             // We don't expect any JavaScript exceptions but the fatal ones here.
                             try
+                                Log.Debug("Continuing async JS function {id}", id)
+
+                                // This schedules a microtask to continue the evaluation.
+                                // If we the current thread isn't inside V8 already (if we suspended),
+                                // the microtask will be processed immediately. Otherwise,
+                                // it won't happen until the current evaluation finishes.
                                 match result with
                                 | Ok r -> ignore <| resolve.InvokeAsFunction(r)
                                 | Error e ->
                                     let jsE = hostEDIToJSException e
                                     ignore <| reject.InvokeAsFunction(jsE)
+
+                                Log.Debug("Finished continuing async JS function {id}", id)
                             with :? ScriptEngineException as e when e.IsFatal ->
                                 runtime.SetMetMemoryLimit()
                                 reraise' e
@@ -858,15 +889,22 @@ type JSEngine(runtime: JSRuntime, env: JSEnvironment) as this =
     member this.RunJSFunction(func: IJavaScriptObject, args: obj[]) : obj =
         this.RunJSFunction(func, args, CancellationToken.None)
 
-    abstract member RunAsyncJSFunction: IJavaScriptObject * obj[] * CancellationToken -> Task<obj>
+    abstract member RunAsyncJSFunction: IJavaScriptObject * obj[] * (unit -> unit) * CancellationToken -> Task<obj>
 
     default this.RunAsyncJSFunction
-        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
-        : Task<obj> =
+        (func: IJavaScriptObject, args: obj[], whenPromiseFinished: (unit -> unit), cancellationToken: CancellationToken) : Task<
+                                                                                                                                obj
+                                                                                                                             >
+        =
         if func.Engine <> engine then
             failwith "Function belongs to another engine"
 
-        this.EvaluateAsyncJS cancellationToken <| fun () -> func.InvokeAsFunction(args)
+        this.EvaluateAsyncJS cancellationToken (fun () -> func.InvokeAsFunction(args)) whenPromiseFinished
+
+    member this.RunAsyncJSFunction
+        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
+        : Task<obj> =
+        this.RunAsyncJSFunction(func, args, (fun () -> ()), cancellationToken)
 
     member this.RunAsyncJSFunction(func: IJavaScriptObject, args: obj[]) : Task<obj> =
         this.RunAsyncJSFunction(func, args, CancellationToken.None)
@@ -902,7 +940,10 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
         let wrappedRunTask () =
             let currScheduler = scheduler.Value
 
+            Log.Debug("Starting async host task {id}", this.JSRequestID.Value)
+
             if isRefNull currScheduler then
+                Log.Debug("No scheduler for async host task {id}", this.JSRequestID.Value)
                 runTask ()
             else
                 currScheduler.Post(runTask)
@@ -913,25 +954,48 @@ type SchedulerJSEngine<'s when 's :> Task.ICustomTaskScheduler>(runtime: JSRunti
 
     // F# is dumb here.
     member private this.BaseRunAsyncJSFunction
-        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
-        =
-        base.RunAsyncJSFunction(func, args, cancellationToken)
+        (func: IJavaScriptObject, args: obj[], whenPromiseFinished: (unit -> unit), cancellationToken: CancellationToken) =
+        base.RunAsyncJSFunction(func, args, whenPromiseFinished, cancellationToken)
 
     override this.RunAsyncJSFunction
-        (func: IJavaScriptObject, args: obj[], cancellationToken: CancellationToken)
-        : Task<obj> =
+        (func: IJavaScriptObject, args: obj[], whenPromiseFinished: (unit -> unit), cancellationToken: CancellationToken) : Task<
+                                                                                                                                obj
+                                                                                                                             >
+        =
         task {
-            let! retTask =
-                task {
-                    let currScheduler = this.CreateScheduler()
-                    scheduler.Value <- currScheduler
-                    use _ = Task.toDisposable <| fun () -> currScheduler.WaitAll(cancellationToken)
-                    return this.BaseRunAsyncJSFunction(func, args, cancellationToken)
-                }
+            // If we are already inside a JS evaluation (have V8 in the current thread's call stack),
+            // the microtasks queue will only be processed after the current evaluation finishes.
+            // This will prevent `retTask` from getting resolved until then, so we can't reliably
+            // detect that a no-resolve happened. To mitigate that, yield, clearing the call stack.
+            // This must be done before the current JS evaluation starts, so any of the to-be-scheduled
+            // microtasks will be executed right before the async host JS task is finished.
+            // Check `WrapAsyncHostFunction` for more details.
+            do! Task.Yield()
 
+            let mutable promiseFinished = false
+
+            let randId = Random.Shared.Next()
+            Log.Debug("Starting async JS function {id}, previous id: {prevId}", randId, this.JSRequestID.Value)
+            this.JSRequestID.Value <- randId
+
+            let newWhenPromiseFinished () =
+                promiseFinished <- true
+                Log.Debug("Set that the promise finished {id}", randId)
+                whenPromiseFinished ()
+
+            let currScheduler = this.CreateScheduler()
+            scheduler.Value <- currScheduler
+
+            let retTask =
+                this.BaseRunAsyncJSFunction(func, args, newWhenPromiseFinished, cancellationToken)
+
+            Log.Debug("Waiting for all pending tasks in {id}", randId)
+            do! currScheduler.WaitAll(cancellationToken)
             this.Runtime.MemoryLimitCancellationToken.ThrowIfCancellationRequested()
 
-            if not retTask.IsCompleted then
+            Log.Debug("Is promise finished {id}: {finished}", randId, promiseFinished)
+
+            if not promiseFinished then
                 raisef JavaScriptRuntimeException "The called function haven't resolved to a response"
 
             return! retTask

@@ -312,7 +312,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
         (cancellationToken: CancellationToken)
         : Task<CachedState> =
         task {
-            let isolate = jsRuntimes.Get()
+            let runtime = jsRuntimes.Get()
 
             try
                 let! (currentVersion,
@@ -336,7 +336,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                             let modules = resolveModules layout sourceModules true
 
                             let jsEngines = makeJSEngines (moduleFiles modules)
-                            let jsEngine = jsEngines.GetValue isolate
+                            let jsEngine = jsEngines.GetValue runtime
                             let modules = resolvedLoadedModules modules jsEngine true cancellationToken
 
                             do!
@@ -387,7 +387,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
 
                             let userViews = resolveUserViews layout mergedAttrs true generatedViews
 
-                            let jsEngine = jsEngines.GetValue isolate
+                            let jsEngine = jsEngines.GetValue runtime
 
                             let! sourceActions = buildSchemaActions transaction.System None cancellationToken
                             let actions = resolveActions layout true sourceActions
@@ -483,12 +483,12 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                               JSEngine = jsEngine
                               Actions = actions
                               ActionScripts =
-                                RuntimeLocal(fun isolate ->
-                                    prepareActions (jsEngine.GetValue isolate) false actions cancellationToken)
+                                RuntimeLocal(fun runtime ->
+                                    prepareActions (jsEngine.GetValue runtime) false actions cancellationToken)
                               Triggers = mergedTriggers
                               TriggerScripts =
-                                RuntimeLocal(fun isolate ->
-                                    prepareTriggers (jsEngine.GetValue isolate) false triggers cancellationToken)
+                                RuntimeLocal(fun runtime ->
+                                    prepareTriggers (jsEngine.GetValue runtime) false triggers cancellationToken)
                               UserViews = prefetchedViews
                               Domains = domains
                               SystemViews = systemViews
@@ -501,7 +501,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                         do! transaction.Rollback()
                         return reraise' ex
             finally
-                jsRuntimes.Return isolate
+                jsRuntimes.Return runtime
         }
 
     let rec getMigrationLock (transaction: DatabaseTransaction) (cancellationToken: CancellationToken) : Task<bool> =
@@ -647,12 +647,12 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                     let jsEngines = makeJSEngines (moduleFiles modules)
 
                     let actionScripts =
-                        RuntimeLocal(fun isolate ->
-                            prepareActions (jsEngines.GetValue isolate) false actions cancellationToken)
+                        RuntimeLocal(fun runtime ->
+                            prepareActions (jsEngines.GetValue runtime) false actions cancellationToken)
 
                     let triggerScripts =
-                        RuntimeLocal(fun isolate ->
-                            prepareTriggers (jsEngines.GetValue isolate) false triggers cancellationToken)
+                        RuntimeLocal(fun runtime ->
+                            prepareTriggers (jsEngines.GetValue runtime) false triggers cancellationToken)
 
                     do
                         let myIsolate = jsRuntimes.Get()
@@ -807,7 +807,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
             try
                 let mutable isDisposed = false
 
-                let isolate = lazy (jsRuntimes.Get())
+                let runtime = lazy (jsRuntimes.Get())
 
                 let mutable forceAllowBroken = false
 
@@ -914,7 +914,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
 
                             let jsEngine =
                                 try
-                                    jsEngines.GetValue isolate.Value
+                                    jsEngines.GetValue runtime.Value
                                 with :? JavaScriptRuntimeException as e ->
                                     raise
                                     <| ContextException(
@@ -1181,12 +1181,12 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                                   JSEngine = jsEngines
                                   Actions = actions
                                   ActionScripts =
-                                    RuntimeLocal(fun isolate ->
-                                        prepareActions (jsEngines.GetValue isolate) false actions cancellationToken)
+                                    RuntimeLocal(fun runtime ->
+                                        prepareActions (jsEngines.GetValue runtime) false actions cancellationToken)
                                   Triggers = mergedTriggers
                                   TriggerScripts =
-                                    RuntimeLocal(fun isolate ->
-                                        prepareTriggers (jsEngines.GetValue isolate) false triggers cancellationToken)
+                                    RuntimeLocal(fun runtime ->
+                                        prepareTriggers (jsEngines.GetValue runtime) false triggers cancellationToken)
                                   UserViews = prefetchedUserViews
                                   Domains = domains
                                   SystemViews = filterSystemViews sourceUserViews
@@ -1322,7 +1322,7 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
 
                 let jsEngine =
                     lazy
-                        (let jsEngine = oldState.Context.JSEngine.GetValue isolate.Value
+                        (let jsEngine = oldState.Context.JSEngine.GetValue runtime.Value
                          jsEngine.SetAPI(Option.get maybeApi)
                          jsEngine)
 
@@ -1331,14 +1331,14 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                         (
                          // To set the API.
                          ignore <| jsEngine.Force()
-                         oldState.Context.ActionScripts.GetValue isolate.Value)
+                         oldState.Context.ActionScripts.GetValue runtime.Value)
 
                 let triggerScripts =
                     lazy
                         (
                          // To set the API.
                          ignore <| jsEngine.Force()
-                         oldState.Context.TriggerScripts.GetValue isolate.Value)
+                         oldState.Context.TriggerScripts.GetValue runtime.Value)
 
                 let! systemInfo =
                     transaction.Connection.Query.ExecuteRowValuesQuery
@@ -1407,8 +1407,8 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                                 if jsEngine.IsValueCreated then
                                     jsEngine.Value.ResetAPI()
 
-                                if isolate.IsValueCreated then
-                                    jsRuntimes.Return isolate.Value
+                                if runtime.IsValueCreated then
+                                    jsRuntimes.Return runtime.Value
 
                                 (transaction :> IDisposable).Dispose()
                                 (transaction.Connection :> IDisposable).Dispose()
@@ -1420,8 +1420,8 @@ type ContextCacheStore(cacheParams: ContextCacheParams) =
                                     if jsEngine.IsValueCreated then
                                         jsEngine.Value.ResetAPI()
 
-                                    if isolate.IsValueCreated then
-                                        jsRuntimes.Return isolate.Value
+                                    if runtime.IsValueCreated then
+                                        jsRuntimes.Return runtime.Value
 
                                     do! (transaction :> IAsyncDisposable).DisposeAsync()
                                     do! (transaction.Connection :> IAsyncDisposable).DisposeAsync()

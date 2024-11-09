@@ -69,14 +69,20 @@ type NoCustomTaskScheduler() =
 
 type LastTaskRef() =
     let mutable lastTask = Task.CompletedTask
+    let id = Random.Shared.Next()
 
-    member this.Exchange(task: Task) : Task = Interlocked.Exchange(&lastTask, task)
+    do printfn "Creating a scheduled task ref, %d" id
+
+    member this.Exchange(task: Task) : Task =
+        printfn "Adding a scheduled task, %d" id
+        Interlocked.Exchange(&lastTask, task)
 
     member this.WaitForLastTask(cancellationToken: CancellationToken) : Task =
         loop ()
         <| fun () ->
             task {
                 let currLastTask = lastTask
+                printfn "Waiting for a scheduled task, %d" id
                 do! waitFor <| currLastTask.WaitAsync(cancellationToken)
                 cancellationToken.ThrowIfCancellationRequested()
 
