@@ -1,5 +1,7 @@
 # OzmaDB - REST-accessible SQL-like Database with Embedded JavaScript
 
+[![Discord](https://img.shields.io/discord/938075538961080350.svg?label=Chat&logo=discord&color=7289da)](https://discord.gg/Mc8YcF63yt)
+
 OzmaDB is the core database engine for the ozma.io platform. It provides robust features for query execution, data persistence, permission checking, and much more. One of the key principles of OzmaDB is its approach to customization: "all your metadata is also data."
 
 ## Features
