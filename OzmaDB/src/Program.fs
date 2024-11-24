@@ -235,7 +235,12 @@ type private StaticInstance
         member this.GetInstance (host: string) (cancellationToken: CancellationToken) =
             match Map.tryFind host instances with
             | Some instance -> Task.result (Some <| getInstance instance)
-            | None -> Task.result (Option.map getInstance defaultInstance)
+            | None ->
+                match defaultInstance with
+                | None ->
+                    Log.Information("No instance {host} found", host)
+                    Task.result None
+                | Some instance -> instance |> getInstance |> Some |> Task.result
 
         member this.SetExtraConnectionOptions(builder: NpgsqlConnectionStringBuilder) =
             builder.CommandTimeout <- 0
