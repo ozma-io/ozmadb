@@ -13,7 +13,7 @@
         mono
         lttng-ust
         libunwind
-        kerberos
+        krb5
         lldb
         openssl
         nodejs
