@@ -193,46 +193,49 @@ type private DatabaseInstances
             builder.ConnectionIdleLifetime <- 30
             builder.MaxAutoPrepare <- 50
 
-type private StaticInstance(instance: Instance, homeRegion: string option) =
+type private StaticInstance
+    (instances: Map<string, Instance>, defaultInstance: Instance option, homeRegion: string option) =
+    let getInstance (instance: Instance) : IInstance =
+        let parsedRead = parseLimits instance.ReadRateLimitsPerUser
+        let parsedWrite = parseLimits instance.WriteRateLimitsPerUser
+
+        { new IInstance with
+            member this.Name = instance.Name
+
+            member this.Region = Option.ofObj instance.Region
+            member this.Host = instance.Host
+            member this.Port = instance.Port
+            member this.Username = instance.Username
+            member this.Password = instance.Password
+            member this.Database = instance.Database
+
+            member this.Published = instance.Published
+            member this.Owner = instance.Owner
+            member this.DisableSecurity = instance.DisableSecurity
+            member this.AnyoneCanRead = instance.AnyoneCanRead
+            member this.AccessedAt = Some <| SystemClock.Instance.GetCurrentInstant()
+            member this.ShadowAdmins = Seq.empty
+
+            member this.MaxSize = Option.ofNullable instance.MaxSize
+            member this.MaxUsers = Option.ofNullable instance.MaxUsers
+            member this.MaxRequestTime = Option.ofNullable instance.MaxRequestTime
+            member this.ReadRateLimitsPerUser = parsedRead
+            member this.WriteRateLimitsPerUser = parsedWrite
+
+            member this.MaxJSHeapSize = Option.ofNullable instance.MaxJSHeapSize
+            member this.MaxJSStackSize = Option.ofNullable instance.MaxJSStackSize
+
+            member this.UpdateAccessedAtAndDispose newTime = ()
+
+            member this.Dispose() = () }
+
     interface IInstancesSource with
         member this.Region = homeRegion
 
         member this.GetInstance (host: string) (cancellationToken: CancellationToken) =
-            let parsedRead = parseLimits instance.ReadRateLimitsPerUser
-            let parsedWrite = parseLimits instance.WriteRateLimitsPerUser
-
-            let obj =
-                { new IInstance with
-                    member this.Name = instance.Name
-
-                    member this.Region = Option.ofObj instance.Region
-                    member this.Host = instance.Host
-                    member this.Port = instance.Port
-                    member this.Username = instance.Username
-                    member this.Password = instance.Password
-                    member this.Database = instance.Database
-
-                    member this.Published = instance.Published
-                    member this.Owner = instance.Owner
-                    member this.DisableSecurity = instance.DisableSecurity
-                    member this.AnyoneCanRead = instance.AnyoneCanRead
-                    member this.AccessedAt = Some <| SystemClock.Instance.GetCurrentInstant()
-                    member this.ShadowAdmins = Seq.empty
-
-                    member this.MaxSize = Option.ofNullable instance.MaxSize
-                    member this.MaxUsers = Option.ofNullable instance.MaxUsers
-                    member this.MaxRequestTime = Option.ofNullable instance.MaxRequestTime
-                    member this.ReadRateLimitsPerUser = parsedRead
-                    member this.WriteRateLimitsPerUser = parsedWrite
-
-                    member this.MaxJSHeapSize = Option.ofNullable instance.MaxJSHeapSize
-                    member this.MaxJSStackSize = Option.ofNullable instance.MaxJSStackSize
-
-                    member this.UpdateAccessedAtAndDispose newTime = ()
-
-                    member this.Dispose() = () }
-
-            Task.result (Some obj)
+            match Map.tryFind host instances with
+            | Some instance -> Task.result (Some <| getInstance instance)
+            | None -> Task.result (Option.map getInstance defaultInstance)
 
         member this.SetExtraConnectionOptions(builder: NpgsqlConnectionStringBuilder) =
             builder.CommandTimeout <- 0
@@ -437,13 +440,34 @@ let private setupInstancesSource (webAppBuilder: WebApplicationBuilder) =
             )
             :> IInstancesSource
         | "static" ->
-            let instance = Instance(Owner = "owner@example.com")
-            ozmadbSection.GetSection("Instance").Bind(instance)
+            let parseInstance (section: IConfigurationSection) =
+                let instance = Instance(Owner = "owner@example.com")
+                section.Bind(instance)
 
-            if isNull instance.Database then
-                instance.Database <- instance.Username
+                if isNull instance.Database then
+                    instance.Database <- instance.Username
 
-            StaticInstance(instance, homeRegion) :> IInstancesSource
+                instance
+
+            let defaultInstanceSection =
+                try
+                    Some <| ozmadbSection.GetRequiredSection("DefaultInstance")
+                with :? InvalidOperationException ->
+                    try
+                        Some <| ozmadbSection.GetRequiredSection("Instance")
+                    with :? InvalidOperationException ->
+                        None
+
+            let defaultInstance = Option.map parseInstance defaultInstanceSection
+
+            let instancesSection = ozmadbSection.GetSection("Instances")
+
+            let instances =
+                instancesSection.GetChildren()
+                |> Seq.map (fun s -> (s.Key, parseInstance s))
+                |> Map.ofSeq
+
+            StaticInstance(instances, defaultInstance, homeRegion) :> IInstancesSource
         | source -> failwithf "Invalid instancesSource: %s" source
 
     ignore <| services.AddSingleton<IInstancesSource>(getInstancesSource)
