@@ -98,6 +98,9 @@ let private convertValueOrThrow (valType: SimpleValueType) (rawValue: obj) =
     | (VTScalar STDate, (:? LocalDate as value)) -> VDate value
     | (VTScalar STInterval, (:? Period as value)) -> VInterval value
     | (VTScalar STJson, (:? JToken as value)) -> VJson(ComparableJToken value)
+    // This should not happen, but sometimes Npgsql fails to map the type correctly.
+    // TODO: investigate.
+    | (VTScalar STJson, (:? string as value)) -> VJson(ComparableJToken(JToken.Parse value))
     | (VTScalar STUuid, (:? Guid as value)) -> VUuid value
     | (VTArray scalarType, (:? Array as rootVals)) ->
         let rec convertArray (convFunc: obj -> 'a option) (vals: Array) : ValueArray<'a> =
