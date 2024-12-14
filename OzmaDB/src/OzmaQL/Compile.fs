@@ -38,7 +38,6 @@ type QueryCompileException(message: string, innerException: Exception, isUserExc
 // Local domain ids get assigned to all sets in a set operation.
 // Each row has a different domain key assigned, so half of rows may come from entity A and half from entity B.
 // This way one can make use if IDs assigned to cells to reference and update them.
-[<NoEquality; NoComparison>]
 type DomainField =
     { Ref: ResolvedFieldRef
       // Needed for fast parsing of subentity names.
@@ -3686,9 +3685,16 @@ let rec private flattenDomains: Domains -> FlattenedDomains =
     function
     | DSingle(id, dom) -> Map.singleton id dom
     | DMulti(ns, subdoms) ->
+        let mergeEqual k a b =
+            if a = b then
+                a
+            else
+                failwithf "Cannot merge equal domains with key %i: %O and %O" k a b
+
         subdoms
         |> Map.values
-        |> Seq.fold (fun m subdoms -> Map.unionUnique m (flattenDomains subdoms)) Map.empty
+        // Duplicate domains are possible here if we flatten a recursive CTE.
+        |> Seq.fold (fun m subdoms -> Map.unionWithKey mergeEqual m (flattenDomains subdoms)) Map.empty
 
 type CompiledExprInfo =
     { Arguments: QueryArguments
