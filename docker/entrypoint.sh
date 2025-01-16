@@ -21,9 +21,20 @@ if ! [ -e /etc/ozmadb/config.json ]; then
     echo "DB_NAME must be set" >&2
     exit 1
   fi
+
+  if [ -z "$EXTERNAL_ORIGIN" ]; then
+    if [ -n "$EXTERNAL_HOSTPORT" ]; then
+      EXTERNAL_ORIGIN="${EXTERNAL_PROTOCOL:-http}://${EXTERNAL_HOSTPORT}"
+    fi
+  fi
+
   if [ -z "$AUTH_AUTHORITY" ]; then
-    echo "AUTH_AUTHORITY must be set" >&2
-    exit 1
+    if [ -n "$EXTERNAL_ORIGIN" ]; then
+      AUTH_AUTHORITY="${EXTERNAL_ORIGIN}/auth/realms/ozma"
+    else
+      echo "AUTH_AUTHORITY must be set" >&2
+      exit 1
+    fi
   fi
 
   if [ -z "$PRELOAD" ] && [ -e /etc/ozmadb/preload.json ]; then
