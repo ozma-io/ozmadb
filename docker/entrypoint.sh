@@ -41,6 +41,12 @@ if ! [ -e /etc/ozmadb/config.json ]; then
     PRELOAD=/etc/ozmadb/preload.json
   fi
 
+  if [ -z "$REDIS" ]; then
+    if [ -n "$REDIS_HOST" ]; then
+      REDIS="${REDIS_HOST}:${REDIS_PORT:-6379}"
+    fi
+  fi
+
   mkdir -p /etc/ozmadb
   jq -n \
     --arg dbHost "$DB_HOST" \
