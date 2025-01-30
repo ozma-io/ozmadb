@@ -1,5 +1,6 @@
 FROM ubuntu:24.04
 
+# ca-certificates are needed for the OIDC interactions.
 RUN apt-get update && apt-get install -y \
   ca-certificates jq \
   && rm -rf /var/lib/apt/lists/*
