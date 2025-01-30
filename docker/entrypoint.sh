@@ -47,6 +47,10 @@ if ! [ -e /etc/ozmadb/config.json ]; then
     fi
   fi
 
+  if [ -z "$EXTRA_JSON_CONFIG" ]; then
+    EXTRA_JSON_CONFIG='{}'
+  fi
+
   mkdir -p /etc/ozmadb
   jq -n \
     --arg dbHost "$DB_HOST" \
@@ -59,6 +63,7 @@ if ! [ -e /etc/ozmadb/config.json ]; then
     --argjson authRequireHttpsMetadata "${AUTH_REQUIRE_HTTPS_METADATA:-true}" \
     --arg preload "$PRELOAD" \
     --arg redis "$REDIS" \
+    --argjson extraJsonConfig "$EXTRA_JSON_CONFIG" \
     '{
       "kestrel": {
         "endpoints": {
@@ -87,7 +92,7 @@ if ! [ -e /etc/ozmadb/config.json ]; then
       } + (if $preload == "" then {} else {"preload": $preload} end)
         + (if $authMetadataAddress == "" then {} else {"authMetadataAddress": $authMetadataAddress} end)
         + (if $redis == "" then {} else {"redis": $redis} end))
-    }' > /etc/ozmadb/config.json
+    } * $extraJsonConfig' > /etc/ozmadb/config.json
 fi
 
 exec /opt/ozmadb/OzmaDB /etc/ozmadb/config.json
