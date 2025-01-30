@@ -13,6 +13,7 @@ open Microsoft.Extensions.DependencyInjection
 open Microsoft.AspNetCore.Cors.Infrastructure
 open Microsoft.AspNetCore.Authentication
 open Microsoft.AspNetCore.Authentication.JwtBearer
+open Microsoft
 open Microsoft.IdentityModel.Tokens
 open Microsoft.EntityFrameworkCore
 open AspNetCoreRateLimit
@@ -484,6 +485,19 @@ let private setupHttpUtils (webAppBuilder: WebApplicationBuilder) =
     ignore <| services.Configure<HttpJobSettings>(ozmadbSection.GetSection("Jobs"))
     ignore <| services.AddSingleton<HttpJobUtils>()
 
+let private setupIdentityModelLogging (app: WebApplication) =
+    let identityConfig =
+        app.Configuration.GetSection("Serilog").GetSection("IdentityModel")
+
+    if identityConfig.GetValue<bool>("Enable") then
+        if identityConfig.GetValue<bool>("ShowPII") then
+            IdentityModel.Logging.IdentityModelEventSource.ShowPII <- true
+
+        let logger =
+            app.Services.GetService<ILoggerFactory>().CreateLogger("Mirosoft.IdentityModel")
+
+        IdentityModel.Logging.LogHelper.Logger <- IdentityModel.LoggingExtensions.IdentityLoggerAdapter(logger)
+
 let private setupApp (app: IApplicationBuilder) =
     let configureMetrics (options: HttpMiddlewareExporterOptions) =
         for name in
@@ -553,6 +567,7 @@ let main (args: string[]) : int =
 
             let app = webAppBuilder.Build()
             setupApp app
+            setupIdentityModelLogging app
 
             app.Run()
 
