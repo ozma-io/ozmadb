@@ -460,10 +460,15 @@ export interface IRequestError extends IBasicError {
   error: 'request'
 }
 
+export interface INotFoundError extends IBasicError {
+  error: 'notFound'
+}
+
 export type UserViewError =
   | GenericError
   | IAccessDeniedError
   | IRequestError
+  | INotFoundError
   | FunQLExecutionError
 
 export interface IExceptionError extends IBasicError {

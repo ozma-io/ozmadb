@@ -99,13 +99,13 @@ type UserViewsAPI(api: IOzmaDBAPI) =
                                 .FirstOrDefaultAsync(ctx.CancellationToken)
 
                         if isNull uv then
-                            return Error <| UVERequest(sprintf "User view %O not found" ref)
+                            return Error UVENotFound
                         else
                             let! anon = ctx.ResolveAnonymousView true (Some ref.Schema) uv.Query
                             return Ok <| applyFlags flags anon
                     else
                         match ctx.UserViews.Find ref with
-                        | None -> return Error <| UVERequest(sprintf "User view %O not found" ref)
+                        | None -> return Error UVENotFound
                         | Some(Error e) ->
                             logger.LogError(e.Error, "Requested user view {uv} is broken", ref)
                             let msg = sprintf "User view %O is broken: %s" ref (fullUserMessage e.Error)

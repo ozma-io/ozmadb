@@ -277,6 +277,7 @@ type UserViewErrorInfo =
     | [<CaseKey("accessDenied", IgnoreFields = [| "Details" |])>] UVEAccessDenied of Details: string
     | [<CaseKey("request", IgnoreFields = [| "Details" |])>] UVERequest of Details: string
     | [<CaseKey("other", IgnoreFields = [| "Details" |])>] UVEOther of Details: string
+    | [<CaseKey("notFound", IgnoreFields = [| "Details" |])>] UVENotFound
     | [<CaseKey(null, Type = CaseSerialization.InnerObject)>] UVEExecution of OzmaQLExecutionError
 
     member this.LogMessage =
@@ -284,6 +285,7 @@ type UserViewErrorInfo =
         | UVEAccessDenied msg -> sprintf "User view access denied: %s" msg
         | UVERequest msg -> msg
         | UVEOther msg -> msg
+        | UVENotFound -> "User view not found"
         | UVEExecution inner -> sprintf "User view execution failed: %s" inner.LogMessage
 
     [<DataMember>]
@@ -298,6 +300,7 @@ type UserViewErrorInfo =
         | UVEAccessDenied msg -> 403
         | UVERequest msg -> 422
         | UVEOther msg -> 500
+        | UVENotFound -> 404
         | UVEExecution inner -> inner.HTTPResponseCode
 
     member this.ShouldLog =
@@ -305,6 +308,7 @@ type UserViewErrorInfo =
         | UVEAccessDenied msg -> true
         | UVERequest msg -> false
         | UVEOther msg -> false
+        | UVENotFound -> false
         | UVEExecution inner -> inner.ShouldLog
 
     member this.Details =
