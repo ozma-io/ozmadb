@@ -24,6 +24,7 @@ namespace OzmaDBSchema.PgCatalog
         public DbSet<Extension> Extensions { get; set; } = null!;
         public DbSet<OpClass> OpClasses { get; set; } = null!;
         public DbSet<Am> Ams { get; set; } = null!;
+        public DbSet<Role> Roles { get; set; } = null!;
 
         public PgCatalogContext()
             : base()
@@ -66,12 +67,12 @@ namespace OzmaDBSchema.PgCatalog
             foreach (var table in modelBuilder.Model.GetEntityTypes())
             {
                 // Needs to be idempotent.
-                var tableName = table.ClrType.Name.ToLower();
-                if (!tableName.StartsWith("pg_"))
+                var tableName = table.GetTableName();
+                if (tableName == null || !tableName.StartsWith("pg_"))
                 {
-                    tableName = "pg_" + tableName;
+                    var newTableName = "pg_" + table.ClrType.Name.ToLower();
+                    table.SetTableName(newTableName);
                 }
-                table.SetTableName(tableName);
                 foreach (var property in table.GetProperties())
                 {
                     var storeObjectId =
@@ -109,7 +110,11 @@ namespace OzmaDBSchema.PgCatalog
                 .AsSplitQuery()
                 .Include(proc => proc.RetType)
                 .Include(proc => proc.Language)
-                .Where(proc => namespaceIds.Contains(proc.ProNamespace) && !extDependIds.Contains(proc.Oid))
+                .Include(proc => proc.Owner)
+                // Filter procedures owned by the `postgres` user; at least in
+                // Yandex-managed PostgreSQL there are injected undeletable
+                // internal functions in `public`.
+                .Where(proc => namespaceIds.Contains(proc.ProNamespace) && !(extDependIds.Contains(proc.Oid) || proc.Owner!.RolName == "postgres"))
                 .ToListAsync();
             var procs = procsList
                 .GroupBy(proc => proc.ProNamespace)
@@ -401,6 +406,8 @@ namespace OzmaDBSchema.PgCatalog
         public bool ProRetSet { get; set; }
         [Required]
         public string ProSrc { get; set; } = null!;
+        [Column(TypeName = "oid")]
+        public uint ProOwner { get; set; }
 
         [ForeignKey("ProNamespace")]
         public Namespace? Namespace { get; set; }
@@ -408,6 +415,8 @@ namespace OzmaDBSchema.PgCatalog
         public Language? Language { get; set; }
         [ForeignKey("ProRetType")]
         public Type? RetType { get; set; }
+        [ForeignKey("ProOwner")]
+        public Role? Owner { get; set; }
     }
 
     [Flags]
@@ -506,5 +515,16 @@ namespace OzmaDBSchema.PgCatalog
 
         [NotMapped]
         public bool? CanOrder { get; set; }
+    }
+
+    [Table("pg_roles")]
+    public class Role
+    {
+        [Column(TypeName = "oid")]
+        [Key]
+        public uint Oid { get; set; }
+
+        [Required]
+        public string RolName { get; set; } = null!;
     }
 }
